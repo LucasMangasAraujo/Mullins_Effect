@@ -5,21 +5,108 @@ reading of input files, etc. See description of each function.
 import numpy as np
 from pathlib import Path
 
-def create_sphere_points(radius, nPoints):
+
+def create_filler_8chain(filler_radius):
     """
-    Create points on a sphere
+    Create filler particle in the 8-chain unit cell, and add them to the Nodes 
+    and Bonds dict
     
     Inputs:
-        radius: sphere radius
+        filler_radius (float): Radius of the filler particle
         
+    Returns:
+        new_Nodes (dict): Dict containing the old coordinates plus new ones from the particle
+        new_Bonds (dict): Dict with new connections in the unit cell
+        Boundary (list): List with strings containing the ids of nodes at the boundary
     """
     
+    # Read file with 8-chain geometry
+    out = readGeometry('..//Geometries//8chain.txt')
+    Nodes, Bonds = out[0], out[1]
+    Boundary = out[2]
+    nNodes, nBonds = len(Nodes), len(Bonds)
+    
+    # Create filler as a sphere with given radius in the centre of the unit cell
+    filler_points, filler_bonds = create_sphere_points_8chain(Nodes = Nodes, radius = filler_radius);
+    nFillerPoints, nFillerBonds = len(filler_points), len(filler_bonds)
+    
+    # Add new filler_points to the dict of nodes
+    old_keys = Nodes.keys() ## store old keys of nodes dict
+    new_Nodes, nNewNodes = {}, nNodes + nFillerPoints;
+    for idx in range(nNewNodes):
+        if idx + 1 in old_keys:
+            new_Nodes[idx + 1] = Nodes[idx + 1]
+        else:
+            new_Nodes[idx + 1] = filler_points[idx - nNodes, :]
+    
+    # Add connections
+    old_keys = Bonds.keys()
+    new_Bonds, nNewBonds = {}, nBonds + nFillerBonds
+    for idx in range(nNewBonds):
+        if idx + 1 in old_keys:
+            ## Old connections
+            new_Bonds[idx + 1] = Bonds[idx + 1]
+        else:
+            ## Connections between sphere points and its centre
+            new_Bonds[idx + 1] = filler_bonds[idx - nBonds] ## 9 is the node number of the cell centre
+        
     
     
+    return new_Nodes, new_Bonds, Boundary
+
+def create_sphere_points_8chain(Nodes, radius):
+    """
+    Create points on a sphere for the 8chain geometry, and new connections to be placed
+    
+    Inputs:
+        Nodes (dict): Dict containing the coordinates of the nodes in the 8-chain cell
+        radius (float): sphere radius.
+        
+    Outputs:
+        sphere_points (ndarray): coordinates of the points on the sphere
+        sphere_bonds (list): connections between the points on the sphere and other points 
+                             in the cell.
+    """
+    
+    # Create Nx3 matrix with unit cell vertices coords
+    cube_vertices = np.array(tuple(Nodes.values())[:-1]);
+    sphere_centre = Nodes[9] ## cell centre
+    nVertices = len(cube_vertices)
+    
+    # Create vectors
+    vectors_to_vertices = cube_vertices - sphere_centre ## from sphere centre to cube corners
+    unit_vectors_to_vertices = vectors_to_vertices / \
+                                np.linalg.norm(vectors_to_vertices, axis = 1)[:, np.newaxis]
+    
+    # Scale unit vectors by the sphere radius
+    sphere_points = (unit_vectors_to_vertices * radius) + sphere_centre
+    
+    # Create numbering (1-indexed) of vertices and points on the sphere
+    vertices_numbering = tuple(Nodes.keys())
+    sphere_points_numbering = np.arange(nVertices + 2, nVertices + len(sphere_points) + 2, 1)
+    
+    # Create bonds between the sphere points and its centre
+    sphere_bonds = [] ## list of bonds (tuples) initialization
+    for i in range(len(sphere_points)):
+        bond = sphere_points_numbering[i], 9
+        sphere_bonds.append(bond)
+    
+    # Loop the sphere points to find correspondances between sphere points and vertices
+    for i, sphere_point in enumerate(sphere_points):
+        ## Get unit vector from centre to point on the sphere
+        vector_to_sphere = sphere_point - sphere_centre
+        unit_vector_to_sphere = vector_to_sphere / np.linalg.norm(vector_to_sphere)
+        
+        ## Find vertext that best aligns with the uni vector
+        dot_products = np.dot(unit_vectors_to_vertices, unit_vector_to_sphere) ## matrix with dot products
+        matching_vertex_idx = np.argmax(dot_products)
+        
+        ## Create bond between point and corresponding vertices
+        bond = sphere_points_numbering[matching_vertex_idx], vertices_numbering[matching_vertex_idx]
+        sphere_bonds.append(bond)
     
     
-    
-    return
+    return sphere_points, sphere_bonds
 
 
 def generate_8chain_geometry(NKuhn, dim = 3):
@@ -82,7 +169,7 @@ def generate_8chain_geometry(NKuhn, dim = 3):
             f.write('%d ' %node);
         f.write("\n");
         ## Write chain length distribution
-        f.write("$Bondtypes\n")
+        f.write("$BondTypes\n")
         for idx, chain_length in Bond_types.items():
             aux = idx, chain_length
             f.write("%d, %g\n" %aux);
@@ -221,7 +308,6 @@ def writePositions(filename, Nodes, Bonds, Boundary, BondTypes, model, params):
         f.write('\n')
 
     return
-
 
 
 def readBondTypes(input,Nbonds):
