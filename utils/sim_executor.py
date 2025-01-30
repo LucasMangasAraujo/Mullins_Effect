@@ -1,0 +1,249 @@
+import numpy as np
+import os
+
+
+def run_relaxation(dim, temp_file, Boundary, model):
+    """
+        This code runs the relaxation after a certain amount of chain have been degraded 
+    """
+    # Generate input files for LAMMPS
+    mainfile = 'main.in'
+    posfile = temp_file 
+    
+    # Write initial position and main file for LAMMPS
+    writeMain(mainfile,posfile,Boundary,dim,model)
+    
+    
+    #reference configuration: run with zero applied displacement
+    err = runinc(loading = 1, inc = 0, dl = 0, dim = dim, main_file = mainfile);
+    
+    return
+
+def runinc(loading,inc,dl,dim, main_file, periodic_flag = False):
+    """ 
+    Run one deformatio increment on the DN using LAMMPS
+        
+    Inputs:
+        loading (int): type of loading.
+            1: uniaxial tension
+            2: biaxial tension
+            3: pure shear
+        inc (int): increment number
+        dl (float): stretch increment
+        dim (int): problem dimension.
+        main_file (str): name of lammps input file.
+        periodic_flag (bool, optional): flag for periodic BC. Default is false.
+        
+    Outputs:
+        None
+    """
+    #print('###Inc %d' %inc)
+
+    #displacement increment applied to the box of dimension 1.2 if not PBC
+    if periodic_flag:
+        du = dl
+    else:
+        du = 1.2*dl
+    
+    #copy main file in temporary file 
+    os.system('cp %s main_tmp.in' %main_file)
+
+    if dim==3:
+    
+        #uniaxial loading
+        if loading == 1:
+            newline = "fix 1 all deform 1 x delta " + str(-du/2.) + " " + str(du/2)  + " y volume z volume remap x units box\n"
+
+        #equi-biaxial loading
+        elif loading == 2:
+            newline = "fix 1 all deform 1 x delta " + str(-du/2.) + " " + str(du/2) + " y delta " + str(-du/2) + " " + str(du/2) + " z volume remap x units box\n"
+
+        #pure shear
+        elif loading == 3:
+            newline = "fix 1 all deform 1 x delta " + str(-du/2) + " " + str(du/2) + " y volume z delta 0 0 remap x units box\n"
+        
+        
+        else:
+            print('invalid loading in runinc: %d' %loading)
+            exit()
+
+    #2D simulation
+    else:
+        newline = "fix 1 all deform 1 x delta " + str(-du/2) + " " + str(du/2) + " y volume remap x units box\n"
+
+    #rewrite the main file by replacing the line with the loading
+    fin = open('main_tmp.in','r')
+    fout = open(main_file,'w')
+
+    for line in fin:
+        
+        if 'delta' in line:
+            fout.write(newline)
+        else:
+            fout.write(line)
+
+    fin.close()
+    fout.close()
+
+    #run lammps and store result file
+    os.system('~/.local/bin/lmp -in %s > log' %main_file)
+
+    #check for error in log file
+    err = checkerror('log.lammps')
+
+    return err
+
+
+def writeMain(simfile,posfile,Boundary,dim,model, periodic_flag = False):
+
+    """ 
+    Write the main input file for LAMMPS
+    """
+
+    min_algo='fire' #algorithm for minimization
+    dmax = 0.05      #how much a single atom can move during line search
+    #dmax = 0.1    # Only of very small it makes a difference
+    #dmax = 10
+    
+    
+    # Find bond style to be used
+    bond_style, err = get_bond_style(model)
+    if err:
+        exit()
+    
+    f = open(simfile,'w')
+
+
+    f.write('#Main input file for LAMMPS\n')
+
+    f.write('units\tlj\n')
+    f.write('dimension\t%d\n' %dim)
+    if dim == 3:
+        f.write('boundary\tf f f \n')
+    else:
+        if not periodic_flag:
+            f.write('boundary\tf f p\n')
+        else:
+            f.write('boundary\tp p p\n')
+    
+    f.write('atom_style\tbond\n')
+    f.write('bond_style\t%s\n' %(bond_style))
+    f.write('atom_modify\tsort 0 0\n')
+    f.write('pair_style\tnone\n\n')
+
+    f.write('read_data\t%s\n\n' %posfile)
+
+    f.write('reset_timestep\t0\n')
+    f.write('timestep\t0.0001\n')
+    f.write('neighbor\t0.1 nsq\n') ## might need to be adjusted for PBC
+    f.write('thermo\t1\n')
+    if dim == 3:
+        f.write('thermo_style\tcustom etotal press pxx pyy pzz pxy pxz pyz\n')
+    else:
+        f.write('thermo_style\tcustom etotal press pxx pyy pxy\n')
+    
+    f.write('min_style\t%s\n' %(min_algo))
+    f.write('min_modify\tdmax %s\n\n' %(dmax))
+    
+    if not periodic_flag:
+        f.write('group\tboundary id ')
+        for i in range(len(Boundary)):
+            f.write('%s ' %(Boundary[i]))
+        f.write('\n\n')
+
+    # Step 1: deform the box affinely 
+    #delta values: change in box boundaries at the end of run  
+    #Note: actual mode of deformation applied here is not important as these lines will be replaced
+    #by run.py on the go
+    if dim == 3:
+        f.write('fix 1 all deform 1 x delta 0 0 y volume z volume remap x units box\n')
+    else:
+        if not periodic_flag:
+            f.write('fix 1 all deform 1 x delta 0 0 y volume remap x units box\n')
+        else:
+            f.write('fix 1 all deform 1 x delta 0 0 y volume remap x units box\n')
+        
+
+    #need a run to apply the fix deform command above
+    f.write('run 1\n\n')
+
+    # Step 2: Apply zero force on boundary nodes (prevent their motion) and minimize energy
+    if not periodic_flag:
+        f.write('fix\t2 boundary setforce 0 0 0\n')
+    f.write('minimize\t0 1e-16 1000 10000\n\n')
+
+    # Step 3: remove the zero-force constraint on the boundary
+    if not periodic_flag:
+        f.write('unfix 2\n\n')
+
+    # Define computation to calculate forces
+    if dim == 3:
+        f.write('compute\t1 boundary property/atom fx fy fz\n')
+        f.write('dump\t1 boundary custom 1 test.res id type x y z c_1[1] c_1[2] c_1[3]\n')
+
+    else:
+        if not periodic_flag:
+            f.write('compute\t1 boundary property/atom fx fy\n')
+            f.write('dump\t1 boundary custom 1 test.res id type x y c_1[1] c_1[2]\n')
+            
+            f.write('dump_modify\t1 sort id\n')
+
+    #run dummy step (0 increment) to perform the dump operation and write test.res
+    f.write('run\t0\n\n')   
+    
+    #write new atom positions
+    f.write('write_data\t%s\n\n' %posfile)
+
+    f.close()
+
+    return
+
+
+def get_bond_style(model):
+    """
+    Get string identifier within lammps of the chain model used
+    
+    Inputs:
+        model (str): string informing the chain model
+        
+    Outputs:
+        bond_style (str): string identifier of the bond style in lammps.
+        err (bool): flag informing if model passed to the function is valid.
+    """
+    err = False;
+    if model in ['1', '5']:
+        bond_style = 'harmonic'
+        
+    elif model == '2':
+        bond_style = 'langevin'
+        
+    elif model == '3':
+        bond_style = 'Xlangevin'
+        
+    elif model == '4':
+        bond_style = 'Fraclangevin';
+        
+    elif model == '6':
+        bond_style = 'Fracharmonic';
+        
+    else:
+        print('unknown bond type: %s' %model)
+        err = True
+        exit()
+    
+    return bond_style, err
+
+def checkerror(filename):
+    
+    fin = open(filename,'r')
+
+    for line in fin:
+        
+        if 'ERROR' in line:
+            print('Error message in log.lammps:')
+            print(line)
+            return True
+    return False
+
+if __name__ == "__main__":
+    main()

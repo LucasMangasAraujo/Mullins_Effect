@@ -2,13 +2,28 @@
 Scritpt responsinble to run the simulations for the 8-chain geometry
 """
 import utils.pre_processing as pre
+import utils.sim_executor as sim
+from utils.network_class import NetworkClass
+from utils.loading import create_monotonic_load, deformation_gradient
 import numpy as np
 from pathlib import Path
+import math
 
 def main():
+    
     # Declare chain and network parameters
     params = (1, 100) ## Kuhn length (nm) and Number of Kuhn segments
+    nub3 = 1e-3; ## normalised (via Kuhn length) chain density
     model = '1' ## chain model 
+    dim = 3 ## problem dimension
+    computational_bKuhn = pow(params[0] / 8, 1/3) ## normalised Kuhn length
+    computational_params = (computational_bKuhn, 100)
+    
+    # Define load
+    loading = 1
+    max_stretch = 5
+    increments = 4
+    stretch_array, stretch_increment = create_monotonic_load(max_stretch, increments)
     
     # Declare path to access folder with geometries and do checks
     path_to_geometry_file = Path('..//Geometries//8chain.txt');
@@ -17,12 +32,33 @@ def main():
         pre.generate_8chain_geometry(params[1])
     
     # Create filler sphere
-    filler_radius = 0.2;
-    Nodes, Bonds, Boundary = pre.create_filler_8chain(filler_radius);
-    BondTypes = {idx: params[1] for idx in Bonds.keys()} ## chain lengths
+    filler_radius = 0.01;
+    Nodes, Bonds, Boundary, bond_flags = pre.create_filler_8chain(filler_radius);
+    BondTypes = {
+                idx: params[1] / 100 if bond_flags[idx] else params[1]
+                for idx in Bonds.keys()
+                } ## chain lengths
     
     # Write lammps data file
     pre.writePositions("filler.dat", Nodes, Bonds, Boundary, BondTypes, model, params)
+    
+    # run relaxation and initialise network object
+    sim.run_relaxation(dim, "filler.dat", Boundary, model)
+    DN = NetworkClass("filler.dat", "test.res")
+    current_position, current_bonds = DN.get_nodes_and_bonds()
+    cauchy_stress = DN.calculate_stress(dim);
+    
+    # Apply load
+    for i in range(1, increments):
+        ## Run deformation step
+        F = deformation_gradient(loading, stretch_array[i])
+        print("F_11 = %g, F_22 = %g, F_33 = %g" %tuple(F))
+        sim.runinc(loading, i + 1, stretch_increment, dim, main_file = 'main.in')
+        
+        ## Update network object
+        DN = NetworkClass("filler.dat", "test.res")
+        cauchy_stress = DN.calculate_stress(dim);
+        print("S_11 = %g, S_22 = %g, S_33 = %g" %tuple(cauchy_stress))
     breakpoint()
     
     

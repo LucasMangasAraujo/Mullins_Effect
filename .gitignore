@@ -1,2 +1,10 @@
 #datfiles
 *.dat
+#infiles
+*.in
+#logfile
+*.lammps
+#dump files
+*.res
+#log
+log

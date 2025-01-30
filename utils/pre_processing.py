@@ -30,29 +30,41 @@ def create_filler_8chain(filler_radius):
     filler_points, filler_bonds = create_sphere_points_8chain(Nodes = Nodes, radius = filler_radius);
     nFillerPoints, nFillerBonds = len(filler_points), len(filler_bonds)
     
-    # Add new filler_points to the dict of nodes
-    old_keys = Nodes.keys() ## store old keys of nodes dict
-    new_Nodes, nNewNodes = {}, nNodes + nFillerPoints;
-    for idx in range(nNewNodes):
-        if idx + 1 in old_keys:
-            new_Nodes[idx + 1] = Nodes[idx + 1]
-        else:
-            new_Nodes[idx + 1] = filler_points[idx - nNodes, :]
+    # Creat pertued filler points
+    perturbed_filler_points, perturbed_filler_bonds = perturb_sphere_points_8chain(filler_points, Nodes[9], nNodes)
+    nPerturbedPoints, nPerturbedBonds = len(perturbed_filler_points), len(perturbed_filler_bonds);
     
-    # Add connections
-    old_keys = Bonds.keys()
-    new_Bonds, nNewBonds = {}, nBonds + nFillerBonds
-    for idx in range(nNewBonds):
-        if idx + 1 in old_keys:
-            ## Old connections
-            new_Bonds[idx + 1] = Bonds[idx + 1]
+    # Add new filler_points to the dict of nodes
+    old_node_keys = set(Nodes.keys()) ## store old keys of nodes dict
+    new_Nodes = {}
+    nNewNodes = nNodes + nFillerPoints + nPerturbedPoints;
+    for idx in range(nNewNodes):
+        if idx + 1 in old_node_keys:
+            new_Nodes[idx + 1] = Nodes[idx + 1]
+        elif idx + 1 <= nNodes + nFillerPoints:
+            new_Nodes[idx + 1] = filler_points[idx - nNodes, :]
         else:
-            ## Connections between sphere points and its centre
-            new_Bonds[idx + 1] = filler_bonds[idx - nBonds] ## 9 is the node number of the cell centre
+            new_Nodes[idx + 1] = perturbed_filler_points[idx - nNodes - nFillerPoints, :]
+    
+    
+    # Form new dict of bonds
+    aux = list(filler_bonds) + list(perturbed_filler_bonds)
+    new_Bonds = {idx + 1: bond for idx, bond in enumerate(aux)}
+    nNewBonds = len(new_Bonds)
+    
+    # Assign bond types to each newly craeted bond
+    bond_flags = {};
+    old_node_keys.remove(9) ## remove numbering of the central node
+    for idx, bond in new_Bonds.items():
+        if any(n in old_node_keys for n in bond):
+            ## Old connections
+            bond_flags[idx] = False
+        else:
+            ## Connections between pertubations and the remaining points
+            bond_flags[idx] = True
         
     
-    
-    return new_Nodes, new_Bonds, Boundary
+    return new_Nodes, new_Bonds, Boundary, bond_flags
 
 def create_sphere_points_8chain(Nodes, radius):
     """
@@ -103,11 +115,51 @@ def create_sphere_points_8chain(Nodes, radius):
         
         ## Create bond between point and corresponding vertices
         bond = sphere_points_numbering[matching_vertex_idx], vertices_numbering[matching_vertex_idx]
-        sphere_bonds.append(bond)
+        #sphere_bonds.append(bond)
     
     
     return sphere_points, sphere_bonds
 
+def perturb_sphere_points_8chain(sphere_points, sphere_centre, nNodes, epsilon = 1e-4):
+    """
+    Create points that pertubed versions of the points on the spheres
+    
+    Inputs:
+        sphere_points (ndarray): Nx3 array with the coordinates of points on the sphere.
+        sphere_centre (ndarray:): 3-row array with coordinates of the sphere centre.
+        nNodes (int): Original number of nodes in the network.
+        epsilon (float, optional): Magnitude of the pertubation.
+        
+    Outputs:
+        perturbed_sphere_points (nparray): Nx3 array with coordinates of perturbed points.
+        
+    
+    """
+    # Calculate unit vectors pointing in the radial direction
+    vector = sphere_points - sphere_centre
+    unit_vectors = vector / np.linalg.norm(vector, axis = 1)[:, np.newaxis]
+    
+    # Created perturbed points
+    perturbed_sphere_points = sphere_points + (epsilon * unit_vectors)
+    nPerturbed = len(perturbed_sphere_points);
+    
+    # Create arrays with global node numbering
+    vertices_global_numbering = np.arange(1, nNodes) ## discard sphere centre
+    sphere_global_numbering = np.arange(nNodes + 1, nNodes + len(sphere_points) + 1, 1)
+    
+    # Create bonds sphere-perturbed 
+    perturbed_bonds = [];
+    for i, node_idx in enumerate(sphere_global_numbering):
+        ## Create first sphere-to-pertubation bond
+        bond = node_idx + nPerturbed, node_idx
+        perturbed_bonds.append(bond)
+        
+        ## Create now pertubation-to-vertex bond
+        bond = node_idx + nPerturbed, vertices_global_numbering[i]
+        perturbed_bonds.append(bond)
+        
+    
+    return perturbed_sphere_points, perturbed_bonds
 
 def generate_8chain_geometry(NKuhn, dim = 3):
     """
