@@ -5,14 +5,177 @@ reading of input files, etc. See description of each function.
 import numpy as np
 from pathlib import Path
 
+def write_data_file(filename, Nodes, Bonds, Angles, Boundary, BondTypes, model, 
+                    params, angle_model , angle_params):
 
-def create_filler_8chain(filler_radius):
+    """
+    Writes LAMMPS data file containing the structure and properties of the
+    DN.
+    
+    filename : name of the file that will be generated
+    Nodes : dictionary whose keys are the IDs of the nodes,
+            and the values are a list with node coordinates
+    Bonds: dictionary whose keys are the bond IDs and the,
+            values are a list containing the pair of nodes 
+            connected.
+    Angles (dict): triplets defining angle and rest angle in 
+                   degrees.
+    Boundary: list of strings with the IDs of the boundary nodes
+    BondTypes: dictionary whose keys are the bond IDs and the,
+            values are the chain lengths.
+    model : string indicating the type of bond behaviour.
+            model = '1': Gaussian
+            model = '2': FJC
+            model = '3': Breakable extensible FJC
+            model = '4': Breakable FJC
+            model = '5': Harmonic (Hookean)
+            molde = '6': Breakable Gaussian chain
+    params: list containing chain parameters other than 
+            the chain length.
+        
+    angle_model: type of angle potential to be used.
+                 model = '1': Harmonic
+    angle_params: list containing parameters not containing in the 
+                  angles dict
+    
+    The function returns None.
+    
+    """
+    
+    # Calculate the number of nodes, bonds, and boundary nodes
+    Natoms = len(Nodes);
+    Nbonds = len(Bonds);
+    Nangles = len(Angles);
+    Nboundary = len(Boundary);
+    NbondTypes = len(BondTypes);
+    
+    # Check for polydispersity
+    chain_lengths = np.array(list(BondTypes.values()));
+    polydispersity_flag = not np.all(chain_lengths == chain_lengths[0])
+    if not polydispersity_flag: NbondTypes = 1;
+    
+    # Open file and write on it
+    with open(filename, 'w') as f:
+        
+        #Header
+        f.write('LAMMPS data file for the initial network geometry\n\n');
+
+        #Number of nodes and bonds
+        f.write('%d atoms\n' %Natoms);
+        f.write('1 atom types\n');
+        f.write('%d bonds\n' %Nbonds);
+        f.write('%d angles\n' %Nangles);
+        f.write('%d bond types\n' %NbondTypes);
+        f.write('%d angle types\n\n' %Nangles);
+
+        #Box dimensions
+        f.write('-0.1 1.1 xlo xhi\n');
+        f.write('-0.1 1.1 ylo yhi\n');
+        f.write('-0.1 1.1 zlo zhi\n\n');
+
+        #Masses
+        f.write('Masses\n\n1 1\n\n');
+
+        #Bond coefficients
+        f.write('Bond Coeffs\n\n');
+        bKuhn = params[0]; ## Kuhn length
+        
+        if polydispersity_flag:
+            for idx, N in BondTypes.items():
+                
+                if model in ['1', '5']: ## Gaussian chain (harmonic)
+                    kappa = (3./2.) * (1 / ( N * pow(bKuhn, 2) )); ## Bond stiffness in the Gaussian regime
+                    if model =='1':
+                        f.write('%d %g %g\n'%(idx, kappa, 0.)); ## zero rest length
+                    elif model == '6':
+                        f.write('%d %g %g %g\n'%(idx, kappa, 0., N * bKuhn)); ## Add the contour length
+                    else:
+                        rest_length = params[2];
+                        f.write('%d %g %g\n'%(idx, kappa, rest_length)); ## zero rest length
+                    
+                elif model == '2' or model == '4': ## FJC or breakable FJC
+                    f.write('%d %g %g\n' %(idx, bKuhn, N));
+                
+                elif model == '3': ## Extensible FJC
+                    bKuhn, Eb, critical_eng = tuple(params);
+                    f.write('%d %g %g %g %g\n' %(idx, bKuhn, N, Eb, critical_eng));
+                
+            
+        else:
+            N = chain_lengths[0];
+            
+            if model in ['1', '5', '6']: ## Gaussian chain (harmonic)
+                
+                kappa = (3./2.) * (1 / ( N * pow(bKuhn, 2) )); ## Bond stiffness in the Gaussian regime
+                if model == '1':
+                    f.write('1 %g %g\n'%(kappa, 0.)); ## zero rest length
+                elif model == '6':
+                    f.write('1 %g %g %g\n'%(kappa, 0., N * bKuhn)); ## Add the contour length
+                else:
+                    rest_length = params[2];
+                    f.write('1 %g %g\n'%(kappa, rest_length)); ## zero rest length
+                
+            elif model == '2' or model == '4': ## FJC or breakable FJC
+                f.write('1 %g %g\n' %(bKuhn, N));
+            
+            elif model == '3': ## Extensible FJC
+                bKuhn, Eb, critical_eng = tuple(params);
+                f.write('1 %g %g %g %g\n' %(bKuhn, N, Eb, critical_eng));
+            
+        
+        f.write('\n\n');
+        
+        # Write angle coefficients
+        f.write('Angle Coeffs\n\n');
+        triplet_dict = {idx: triplet for idx, (triplet, _) in Angles.items()} ## extract triplets
+        if angle_model == '1':
+            kappa_theta = angle_params[0]
+            theta0_dict = {idx: angle for idx, (_, angle) in Angles.items()}
+            for idx, theta_0 in theta0_dict.items():
+                f.write('%d %g %g\n' %(idx, kappa_theta, theta_0))
+                
+            
+        f.write('\n\n');
+        
+        #Atoms ids and positions
+        f.write('Atoms\n\n')
+        for idx in Nodes:
+            f.write('%d 1 1 %g %g %g\n' %(idx,Nodes[idx][0],Nodes[idx][1],Nodes[idx][2]))
+        
+        f.write('\n')
+        # Bonds IDs and pairs of nodes connected by each bond
+        f.write('Bonds\n\n') 
+
+        # Check for polydispersity
+        for idx in Bonds:
+            if(polydispersity_flag): ## Each bond has its own type
+                f.write('%d %d %g %g\n' % (idx,idx,Bonds[idx][0],Bonds[idx][1]) );
+            else: ## there is one bond type only
+                f.write('%d 1 %g %g\n' %(idx,Bonds[idx][0],Bonds[idx][1]));
+            
+        
+        f.write('\n')
+        
+        # Ids of the angles and the atom triplet defining them
+        f.write('Angles\n\n')
+        for idx, triplet in triplet_dict.items():
+            f.write('%d %d %d %d %d\n' %(idx, idx, triplet[0], triplet[1], triplet[2]))
+            
+        f.write('\n')
+
+    return
+
+
+
+
+def create_filler_8chain(filler_radius, filler_epsilon):
     """
     Create filler particle in the 8-chain unit cell, and add them to the Nodes 
     and Bonds dict
     
     Inputs:
         filler_radius (float): Radius of the filler particle
+        filler_epsilon (float): pertubation of the offset points.
         
     Returns:
         new_Nodes (dict): Dict containing the old coordinates plus new ones from the particle
@@ -27,11 +190,11 @@ def create_filler_8chain(filler_radius):
     nNodes, nBonds = len(Nodes), len(Bonds)
     
     # Create filler as a sphere with given radius in the centre of the unit cell
-    filler_points, filler_bonds = create_sphere_points_8chain(Nodes = Nodes, radius = filler_radius);
+    filler_points, filler_bonds, filler_angles = create_sphere_points_8chain(Nodes = Nodes, radius = filler_radius);
     nFillerPoints, nFillerBonds = len(filler_points), len(filler_bonds)
     
     # Creat pertued filler points
-    perturbed_filler_points, perturbed_filler_bonds = perturb_sphere_points_8chain(filler_points, Nodes[9], nNodes)
+    perturbed_filler_points, perturbed_filler_bonds = perturb_sphere_points_8chain(filler_points, Nodes[9], nNodes, filler_epsilon)
     nPerturbedPoints, nPerturbedBonds = len(perturbed_filler_points), len(perturbed_filler_bonds);
     
     # Add new filler_points to the dict of nodes
@@ -63,8 +226,12 @@ def create_filler_8chain(filler_radius):
             ## Connections between pertubations and the remaining points
             bond_flags[idx] = True
         
+        
+    # Create dict containing angles
+    new_Angles = {i + 1: triplet_and_angle for i, triplet_and_angle in enumerate(filler_angles)}
     
-    return new_Nodes, new_Bonds, Boundary, bond_flags
+    
+    return new_Nodes, new_Bonds, Boundary, bond_flags, new_Angles
 
 def create_sphere_points_8chain(Nodes, radius):
     """
@@ -82,7 +249,8 @@ def create_sphere_points_8chain(Nodes, radius):
     
     # Create Nx3 matrix with unit cell vertices coords
     cube_vertices = np.array(tuple(Nodes.values())[:-1]);
-    sphere_centre = Nodes[9] ## cell centre
+    idx_of_central_node = 9;
+    sphere_centre = Nodes[idx_of_central_node] ## cell centre
     nVertices = len(cube_vertices)
     
     # Create vectors
@@ -97,10 +265,28 @@ def create_sphere_points_8chain(Nodes, radius):
     vertices_numbering = tuple(Nodes.keys())
     sphere_points_numbering = np.arange(nVertices + 2, nVertices + len(sphere_points) + 2, 1)
     
+    # Create angles of the sphere
+    sphere_angles = []
+    dot_products = np.dot(unit_vectors_to_vertices, unit_vectors_to_vertices.T)
+    angles = np.arccos(np.clip(dot_products, -1, 1))
+    
+    for i, unit_vector1 in enumerate(unit_vectors_to_vertices):
+        for j, unit_vector2 in enumerate(unit_vectors_to_vertices):
+            if i == j:
+                continue
+            ## Generate triplet and check if does not exist already
+            triplet = (sphere_points_numbering[i], idx_of_central_node, sphere_points_numbering[j])
+            existent_triplets = {tuple(sorted(t[0])) for t in sphere_angles if len(sphere_angles) > 0}
+            if tuple(sorted(triplet)) in existent_triplets:
+                continue
+                
+            sphere_angles.append([triplet, np.degrees(angles[i, j])])
+        
+    
     # Create bonds between the sphere points and its centre
     sphere_bonds = [] ## list of bonds (tuples) initialization
     for i in range(len(sphere_points)):
-        bond = sphere_points_numbering[i], 9
+        bond = sphere_points_numbering[i], idx_of_central_node
         sphere_bonds.append(bond)
     
     # Loop the sphere points to find correspondances between sphere points and vertices
@@ -118,9 +304,9 @@ def create_sphere_points_8chain(Nodes, radius):
         #sphere_bonds.append(bond)
     
     
-    return sphere_points, sphere_bonds
+    return sphere_points, sphere_bonds, sphere_angles
 
-def perturb_sphere_points_8chain(sphere_points, sphere_centre, nNodes, epsilon = 1e-4):
+def perturb_sphere_points_8chain(sphere_points, sphere_centre, nNodes, epsilon = 1e-6):
     """
     Create points that pertubed versions of the points on the spheres
     

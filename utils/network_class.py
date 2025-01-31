@@ -52,7 +52,7 @@ class NetworkClass:
                 x = float(data[3])
                 y = float(data[4])
                 z = float(data[5])
-                Nodes[idx] = [x, y, z] 
+                Nodes[idx] = np.array([x, y, z]) 
 
                 data = f.readline().split()
             

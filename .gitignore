@@ -8,3 +8,7 @@
 *.res
 #log
 log
+#python files
+run_tests.py
+utils/post_processing.py
+utils/__pycache__/
