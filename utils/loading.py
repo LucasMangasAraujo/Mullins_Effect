@@ -16,7 +16,7 @@ def create_monotonic_load(max_stretch, increments):
         stretch_increment (float): stretch increment.
     """
     # Create loading history
-    stretch_array = np.linspace(1, max_stretch, increments, endpoint = True)
+    stretch_array = np.linspace(1, max_stretch, increments + 1, endpoint = True)
     
     # Calculate (average) stretch
     stretch_increment = np.mean(np.diff(stretch_array))

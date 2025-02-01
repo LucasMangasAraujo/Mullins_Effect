@@ -6,7 +6,7 @@ import numpy as np
 from pathlib import Path
 
 def write_data_file(filename, Nodes, Bonds, Angles, Boundary, BondTypes, model, 
-                    params, angle_model , angle_params):
+                    params, rest_lengths, angle_model , angle_params):
 
     """
     Writes LAMMPS data file containing the structure and properties of the
@@ -85,8 +85,9 @@ def write_data_file(filename, Nodes, Bonds, Angles, Boundary, BondTypes, model,
                 
                 if model in ['1', '5']: ## Gaussian chain (harmonic)
                     kappa = (3./2.) * (1 / ( N * pow(bKuhn, 2) )); ## Bond stiffness in the Gaussian regime
+                    r0 = rest_lengths[idx]
                     if model =='1':
-                        f.write('%d %g %g\n'%(idx, kappa, 0.)); ## zero rest length
+                        f.write('%d %g %g\n'%(idx, kappa, r0))
                     elif model == '6':
                         f.write('%d %g %g %g\n'%(idx, kappa, 0., N * bKuhn)); ## Add the contour length
                     else:
@@ -166,7 +167,44 @@ def write_data_file(filename, Nodes, Bonds, Angles, Boundary, BondTypes, model,
     return
 
 
-
+def assign_bond_types(bond_flags, filler_radius, filler_epsilon, NKuhn, NKuhn_reduction = 1e6):
+    """
+    Assign spring properties to each bond in the network.
+    
+    Inputs:
+        bond_flags (dict): flags indicating the type of bond
+        filler_radius (float): radius of the filler partilcles
+        filler_epsilon (float): offset of the filler points
+        NKuhn (float): original number of Kuhn segments.
+        NKuhn_reduction (float): reduction factor of the chain length for the filler 
+                                 bonds.
+        
+    Outputs:
+        BondTypes (dict): types of each bond and their chain lengths
+        rest_lengths (dict): rest lengths of the bonds. Only relevant for filler bonds
+    """
+    
+    # Create BondTypes containing chains lengths of each type
+    BondTypes = {
+                idx: NKuhn / NKuhn_reduction if bond_flags[idx][0] else NKuhn
+                for idx in bond_flags.keys()
+                }
+    
+    # Assemble rest lenghts for the sphere links (TO DO: INCLUDE THIS IN A PRE-PROCESSING FUNCTION)
+    rest_lengths = {}
+    for idx, bond_type in bond_flags.items():
+        ## First check if link is associated with filler
+        if bond_type[0]:
+            if bond_type[1]:
+                rest_lengths[idx] = filler_radius
+            else:
+                rest_lengths[idx] = filler_radius + filler_epsilon
+            
+        else:
+            rest_lengths[idx] = 0.
+    
+    
+    return BondTypes, rest_lengths
 
 def create_filler_8chain(filler_radius, filler_epsilon):
     """
@@ -188,9 +226,11 @@ def create_filler_8chain(filler_radius, filler_epsilon):
     Nodes, Bonds = out[0], out[1]
     Boundary = out[2]
     nNodes, nBonds = len(Nodes), len(Bonds)
+    idx_of_central_node = 9 ## numbering of central node representing the sphere centre
     
     # Create filler as a sphere with given radius in the centre of the unit cell
-    filler_points, filler_bonds, filler_angles = create_sphere_points_8chain(Nodes = Nodes, radius = filler_radius);
+    filler_points, filler_bonds, filler_angles = create_sphere_points_8chain(Nodes = Nodes, radius = filler_radius, 
+                                                                                idx_of_central_node = 9);
     nFillerPoints, nFillerBonds = len(filler_points), len(filler_bonds)
     
     # Creat pertued filler points
@@ -219,27 +259,32 @@ def create_filler_8chain(filler_radius, filler_epsilon):
     bond_flags = {};
     old_node_keys.remove(9) ## remove numbering of the central node
     for idx, bond in new_Bonds.items():
+        ## Note that two flags are given: non-regular bond, sphere_bond (in sphere)
         if any(n in old_node_keys for n in bond):
             ## Old connections
-            bond_flags[idx] = False
+            bond_flags[idx] = False, False ## only one flag for regular bonds
         else:
-            ## Connections between pertubations and the remaining points
-            bond_flags[idx] = True
+            ## Connections between pertubations and the remaining points.
+            if idx_of_central_node in bond:
+                bond_flags[idx] = True, True
+            else:
+                bond_flags[idx] = True, False
         
-        
+    
     # Create dict containing angles
     new_Angles = {i + 1: triplet_and_angle for i, triplet_and_angle in enumerate(filler_angles)}
     
     
     return new_Nodes, new_Bonds, Boundary, bond_flags, new_Angles
 
-def create_sphere_points_8chain(Nodes, radius):
+def create_sphere_points_8chain(Nodes, radius, idx_of_central_node):
     """
     Create points on a sphere for the 8chain geometry, and new connections to be placed
     
     Inputs:
         Nodes (dict): Dict containing the coordinates of the nodes in the 8-chain cell
         radius (float): sphere radius.
+        idx_of_central_node (int): index of node representing the sphere centre.
         
     Outputs:
         sphere_points (ndarray): coordinates of the points on the sphere
@@ -249,7 +294,6 @@ def create_sphere_points_8chain(Nodes, radius):
     
     # Create Nx3 matrix with unit cell vertices coords
     cube_vertices = np.array(tuple(Nodes.values())[:-1]);
-    idx_of_central_node = 9;
     sphere_centre = Nodes[idx_of_central_node] ## cell centre
     nVertices = len(cube_vertices)
     
@@ -415,7 +459,7 @@ def generate_8chain_geometry(NKuhn, dim = 3):
     
     return
 
-def writePositions(filename, Nodes, Bonds, Boundary, BondTypes, model, params):
+def writePositions(filename, Nodes, Bonds, Boundary, BondTypes, model, params, rest_lengths):
 
     """
     Writes a file containing the architecture of the discrete network 
@@ -442,6 +486,9 @@ def writePositions(filename, Nodes, Bonds, Boundary, BondTypes, model, params):
     params: list containing chain parameters other than 
             the chain length.
             
+    rest_lengths (dict): dict containing the rest length of the bonds.
+                         Only relevant for bonds representing fillers.
+    
     
     The function returns None.
     
@@ -488,7 +535,11 @@ def writePositions(filename, Nodes, Bonds, Boundary, BondTypes, model, params):
                 if model in ['1', '5']: ## Gaussian chain (harmonic)
                     kappa = (3./2.) * (1 / ( N * pow(bKuhn, 2) )); ## Bond stiffness in the Gaussian regime
                     if model =='1':
-                        f.write('%d %g %g\n'%(idx, kappa, 0.)); ## zero rest length
+                        r0 = rest_lengths[idx]
+                        if np.isclose(r0, 0):
+                            f.write('%d %g %g\n'%(idx, kappa, 0.)); ## zero rest length for regular bonds
+                        else:
+                            f.write('%d %g %g\n'%(idx, kappa, r0))
                     elif model == '6':
                         f.write('%d %g %g %g\n'%(idx, kappa, 0., N * bKuhn)); ## Add the contour length
                     else:

@@ -2,7 +2,6 @@ import numpy as np
 import os
 
 
-
 def run_relaxation_angles(dim, temp_file, Boundary, model, angle_model):
     """
         This code runs the relaxation considering angle hinderence 
@@ -19,7 +18,6 @@ def run_relaxation_angles(dim, temp_file, Boundary, model, angle_model):
     err = runinc(loading = 1, inc = 0, dl = 0, dim = dim, main_file = mainfile);
     
     return
-
 
 
 def run_relaxation(dim, temp_file, Boundary, model):

@@ -12,3 +12,6 @@ log
 run_tests.py
 utils/post_processing.py
 utils/__pycache__/
+radius_effect.py
+# results folder
+results/
