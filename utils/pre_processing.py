@@ -12,31 +12,35 @@ def write_data_file(filename, Nodes, Bonds, Angles, Boundary, BondTypes, model,
     Writes LAMMPS data file containing the structure and properties of the
     DN.
     
-    filename : name of the file that will be generated
-    Nodes : dictionary whose keys are the IDs of the nodes,
-            and the values are a list with node coordinates
-    Bonds: dictionary whose keys are the bond IDs and the,
-            values are a list containing the pair of nodes 
-            connected.
-    Angles (dict): triplets defining angle and rest angle in 
-                   degrees.
-    Boundary: list of strings with the IDs of the boundary nodes
-    BondTypes: dictionary whose keys are the bond IDs and the,
-            values are the chain lengths.
-    model : string indicating the type of bond behaviour.
-            model = '1': Gaussian
-            model = '2': FJC
-            model = '3': Breakable extensible FJC
-            model = '4': Breakable FJC
-            model = '5': Harmonic (Hookean)
-            molde = '6': Breakable Gaussian chain
-    params: list containing chain parameters other than 
-            the chain length.
-        
-    angle_model: type of angle potential to be used.
-                 model = '1': Harmonic
-    angle_params: list containing parameters not containing in the 
-                  angles dict
+    NOTE: If model != '1', them hybrig bond style will be used. This means
+    that bonds need to have their style i the data file.
+    
+    Inputs:
+        filename : name of the file that will be generated
+        Nodes : dictionary whose keys are the IDs of the nodes,
+                and the values are a list with node coordinates
+        Bonds: dictionary whose keys are the bond IDs and the,
+                values are a list containing the pair of nodes 
+                connected.
+        Angles (dict): triplets defining angle and rest angle in 
+                       degrees.
+        Boundary: list of strings with the IDs of the boundary nodes
+        BondTypes: dictionary whose keys are the bond IDs and the,
+                values are the chain lengths.
+        model : string indicating the type of bond behaviour.
+                model = '1': Gaussian
+                model = '2': FJC
+                model = '3': Breakable extensible FJC
+                model = '4': Breakable FJC
+                model = '5': Harmonic (Hookean)
+                molde = '6': Breakable Gaussian chain
+        params: list containing chain parameters other than 
+                the chain length.
+            
+        angle_model: type of angle potential to be used.
+                     model = '1': Harmonic
+        angle_params: list containing parameters not containing in the 
+                      angles dict
     
     The function returns None.
     
@@ -68,7 +72,7 @@ def write_data_file(filename, Nodes, Bonds, Angles, Boundary, BondTypes, model,
         f.write('%d bond types\n' %NbondTypes);
         f.write('%d angle types\n\n' %Nangles);
 
-        #Box dimensions
+        #Box dimensions 
         f.write('-0.1 1.1 xlo xhi\n');
         f.write('-0.1 1.1 ylo yhi\n');
         f.write('-0.1 1.1 zlo zhi\n\n');
@@ -82,10 +86,10 @@ def write_data_file(filename, Nodes, Bonds, Angles, Boundary, BondTypes, model,
         
         if polydispersity_flag:
             for idx, N in BondTypes.items():
-                
+                ## Ger rest lengths and calcualte Gaussian stiffness
+                r0 = rest_lengths[idx] ## rest length of the bonds
+                kappa = (3./2.) * (1 / ( N * pow(bKuhn, 2) )); ## Bond stiffness in the Gaussian regime
                 if model in ['1', '5']: ## Gaussian chain (harmonic)
-                    kappa = (3./2.) * (1 / ( N * pow(bKuhn, 2) )); ## Bond stiffness in the Gaussian regime
-                    r0 = rest_lengths[idx]
                     if model =='1':
                         f.write('%d %g %g\n'%(idx, kappa, r0))
                     elif model == '6':
@@ -95,7 +99,10 @@ def write_data_file(filename, Nodes, Bonds, Angles, Boundary, BondTypes, model,
                         f.write('%d %g %g\n'%(idx, kappa, rest_length)); ## zero rest length
                     
                 elif model == '2' or model == '4': ## FJC or breakable FJC
-                    f.write('%d %g %g\n' %(idx, bKuhn, N));
+                    if np.isclose(r0, 0, atol = 1e-16):
+                        f.write('%d langevin %g %g\n' %(idx, bKuhn, N));
+                    else:
+                        f.write('%d harmonic %g %g\n'%(idx, kappa, r0))
                 
                 elif model == '3': ## Extensible FJC
                     bKuhn, Eb, critical_eng = tuple(params);
@@ -198,7 +205,7 @@ def assign_bond_types(bond_flags, filler_radius, filler_epsilon, NKuhn, NKuhn_re
             if bond_type[1]:
                 rest_lengths[idx] = filler_radius
             else:
-                rest_lengths[idx] = filler_radius + filler_epsilon
+                rest_lengths[idx] = filler_epsilon
             
         else:
             rest_lengths[idx] = 0.

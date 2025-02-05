@@ -10,6 +10,9 @@
 log
 #python files
 run_tests.py
+run_hybrid.py
+angleRestriction_effect.py
+springStifness_effect.py
 utils/post_processing.py
 utils/__pycache__/
 radius_effect.py

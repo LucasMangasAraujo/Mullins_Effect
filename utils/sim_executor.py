@@ -1,6 +1,32 @@
 import numpy as np
 import os
 
+def run_relaxation_hybrid(dim, temp_file, Boundary, model, angle_model, bond_coeff_lines):
+    """
+    Relax network with hybrid bond styles. It works as well when all bonds
+    are of the same style, i.e., harmonic.
+    """
+    # Generate input files for LAMMPS
+    mainfile = 'main_hybrid.in'
+    posfile = temp_file 
+    
+    # Write initial position and main file for LAMMPS
+    if model == '1':
+        write_main_angles(mainfile,posfile,Boundary,dim,model,angle_model)
+    else:
+        write_main_hybrid(mainfile, posfile, Boundary, dim, model, angle_model)
+    
+    
+    #reference configuration: run with zero applied displacement
+    err = runinc(loading = 1, inc = 0, dl = 0, dim = dim, main_file = mainfile);
+    
+    # If hybrid bond style was used, rewrite the bond coefficients section
+    if model != '1':
+        from .post_processing import rewrite_data_file
+        rewrite_data_file(bond_coeff_lines, temp_file)
+    
+    return
+
 
 def run_relaxation_angles(dim, temp_file, Boundary, model, angle_model):
     """
@@ -30,7 +56,6 @@ def run_relaxation(dim, temp_file, Boundary, model):
     
     # Write initial position and main file for LAMMPS
     writeMain(mainfile,posfile,Boundary,dim,model)
-    
     
     #reference configuration: run with zero applied displacement
     err = runinc(loading = 1, inc = 0, dl = 0, dim = dim, main_file = mainfile);
@@ -110,6 +135,121 @@ def runinc(loading,inc,dl,dim, main_file, periodic_flag = False):
     err = checkerror('log.lammps')
 
     return err
+
+
+def write_main_hybrid(simfile,posfile, Boundary,dim,model, angle_model, periodic_flag = False):
+
+    """ 
+    Write the main input file for LAMMPS when more that one bond style in present
+    """
+
+    min_algo='fire' #algorithm for minimization
+    dmax = 0.05      #how much a single atom can move during line search
+    #dmax = 0.1    # Only of very small it makes a difference
+    #dmax = 10
+    
+    
+    # Find bond style to be used
+    bond_style, err = get_bond_style(model)
+    if err:
+        exit()
+    
+    # Find angle style to be used
+    angle_style = get_angle_style(angle_model) 
+    
+    # Open file and start writting process
+    f = open(simfile,'w')
+
+
+    f.write('#Main input file for LAMMPS\n')
+
+    f.write('units\tlj\n')
+    f.write('dimension\t%d\n' %dim)
+    if dim == 3:
+        f.write('boundary\tf f f \n')
+    else:
+        if not periodic_flag:
+            f.write('boundary\tf f p\n')
+        else:
+            f.write('boundary\tp p p\n')
+    
+    f.write('atom_style\tmolecular\n')
+    f.write('bond_style\t hybrid harmonic %s\n' %(bond_style)) ## harmonic style for sphere bonds
+    f.write('angle_style\t%s\n' %(angle_style))
+    f.write('atom_modify\tsort 0 0\n')
+    f.write('pair_style\tnone\n\n')
+
+    f.write('read_data\t%s\n\n' %posfile)
+
+    f.write('reset_timestep\t0\n')
+    f.write('timestep\t0.0001\n')
+    f.write('neighbor\t0.1 nsq\n') ## might need to be adjusted for PBC
+    f.write('thermo\t1\n')
+    if dim == 3:
+        f.write('thermo_style\tcustom etotal press pxx pyy pzz pxy pxz pyz\n')
+    else:
+        f.write('thermo_style\tcustom etotal press pxx pyy pxy\n')
+    
+    f.write('min_style\t%s\n' %(min_algo))
+    f.write('min_modify\tdmax %s\n\n' %(dmax))
+    
+    if not periodic_flag:
+        f.write('group\tboundary id ')
+        for i in range(len(Boundary)):
+            f.write('%s ' %(Boundary[i]))
+        f.write('\n\n')
+
+    # Step 1: deform the box affinely 
+    #delta values: change in box boundaries at the end of run  
+    #Note: actual mode of deformation applied here is not important as these lines will be replaced
+    #by run.py on the go
+    if dim == 3:
+        f.write('fix 1 all deform 1 x delta 0 0 y volume z volume remap x units box\n')
+    else:
+        if not periodic_flag:
+            f.write('fix 1 all deform 1 x delta 0 0 y volume remap x units box\n')
+        else:
+            f.write('fix 1 all deform 1 x delta 0 0 y volume remap x units box\n')
+        
+
+    #need a run to apply the fix deform command above
+    f.write('run 1\n\n')
+
+    # Step 2: Apply zero force on boundary nodes (prevent their motion) and minimize energy
+    if not periodic_flag:
+        f.write('fix\t2 boundary setforce 0 0 0\n')
+    f.write('minimize\t1e-10 1e-10 100000 10000\n\n')
+    #f.write('minimize\t0 1e-16 1000 10000\n\n')
+
+    # Step 3: remove the zero-force constraint on the boundary
+    if not periodic_flag:
+        f.write('unfix 2\n\n')
+
+    # Define computation to calculate forces
+    if dim == 3:
+        f.write('compute\t1 boundary property/atom fx fy fz\n')
+        f.write('dump\t1 boundary custom 1 test.res id type x y z c_1[1] c_1[2] c_1[3]\n')
+
+    else:
+        if not periodic_flag:
+            f.write('compute\t1 boundary property/atom fx fy\n')
+            f.write('dump\t1 boundary custom 1 test.res id type x y c_1[1] c_1[2]\n')
+            
+            f.write('dump_modify\t1 sort id\n')
+
+    #run dummy step (0 increment) to perform the dump operation and write test.res
+    f.write('run\t0\n\n')   
+    
+    #write new atom positions
+    f.write('write_data\t%s\n\n' %posfile)
+
+    f.close()
+    
+    
+    
+    return
+
+
 
 
 def write_main_angles(simfile,posfile, Boundary,dim,model, angle_model, periodic_flag = False):
@@ -193,7 +333,8 @@ def write_main_angles(simfile,posfile, Boundary,dim,model, angle_model, periodic
     # Step 2: Apply zero force on boundary nodes (prevent their motion) and minimize energy
     if not periodic_flag:
         f.write('fix\t2 boundary setforce 0 0 0\n')
-    f.write('minimize\t0 1e-16 1000 10000\n\n')
+    f.write('minimize\t1e-10 1e-10 100000 10000\n\n')
+    #f.write('minimize\t0 1e-16 1000 10000\n\n')
 
     # Step 3: remove the zero-force constraint on the boundary
     if not periodic_flag:
@@ -300,7 +441,8 @@ def writeMain(simfile,posfile,Boundary,dim,model, periodic_flag = False):
     # Step 2: Apply zero force on boundary nodes (prevent their motion) and minimize energy
     if not periodic_flag:
         f.write('fix\t2 boundary setforce 0 0 0\n')
-    f.write('minimize\t0 1e-16 1000 10000\n\n')
+    f.write('minimize\t1e-12 1e-12 1000 10000\n\n')
+    #f.write('minimize\t0 1e-16 1000 10000\n\n')
 
     # Step 3: remove the zero-force constraint on the boundary
     if not periodic_flag:

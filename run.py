@@ -42,9 +42,9 @@ def main():
                 } ## chain lengths
     
     # Write lammps data file
-    pre.writePositions("filler.dat", Nodes, Bonds, Boundary, BondTypes, model, params)
+    pre.writePositions("filler.dat", Nodes, Bonds, Boundary, BondTypes, model, computational_params)
     pre.write_data_file("filler_angles.dat", Nodes, Bonds, Angles, Boundary, BondTypes, model, 
-                        params, angle_model, angle_stiffness)
+                        computational_params, angle_model, angle_stiffness)
     
     # run relaxation without angle constraint
     sim.run_relaxation(dim, "filler.dat", Boundary, model)
