@@ -1,13 +1,18 @@
 #datfiles
 *.dat
+
 #infiles
 *.in
+
 #logfile
 *.lammps
+
 #dump files
 *.res
+
 #log
 log
+
 #python files
 run_tests.py
 run_hybrid.py
@@ -16,5 +21,7 @@ springStifness_effect.py
 utils/post_processing.py
 utils/__pycache__/
 radius_effect.py
+run_DN.py
+
 # results folder
 results/

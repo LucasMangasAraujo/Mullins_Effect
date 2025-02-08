@@ -3,7 +3,259 @@ Script containing pre-processing functions, such as generation of data files,
 reading of input files, etc. See description of each function.
 """
 import numpy as np
+import random
 from pathlib import Path
+from .network_class import NetworkClass
+from collections import defaultdict
+
+
+
+def create_fillers(nFillers, filler_radius, filler_epsilon):
+    """
+    Create filler particles at random points in the interior of the RVE.
+    
+    Inputs:
+        nFillers (int): number of filler particles.
+        filler_radius (float): filler radius 
+        filler_epsilon (float) offset of the filler points
+        
+    Outputs:
+        new_Nodes (dict): nodes in the network with the fillers
+        new_Bonds (dict): new bonds in the network.
+        bond_flags (dict): flags indicating the nature of the bonds (regular, filler, offset)
+        new_Angles (dict): angles between intra-filler bonds
+        angle_to_pair(dict): map betwen pair of bonds idx and their associated angles
+        
+    """
+    # Create Network object
+    DN = NetworkClass("temp.dat", "test.res", "main.in")
+    
+    # Get Nodes and Bonds dicts
+    Nodes, Bonds = DN.get_nodes_and_bonds()
+    nNodes_old = len(Nodes) ## old number of nodes
+    nBonds_old = len(Bonds) ## old number of bonds
+    
+    # Create graph object from the DN
+    G = DN.create_DN_graph()
+    adjency = G.adj.copy()
+    
+    # Get boundary nodes, and separte inner from interior nodes
+    Boundary_set = set(DN.get_boundary())
+    Boundary = [str(node) for node in Boundary_set]
+    nodes_idx_set = set([idx for idx in Nodes.keys()])
+    inner_nodes_idx = nodes_idx_set.difference(Boundary_set)
+    
+    # Radomly pick the points that will be replaced by spheres
+    selected_nodes = sorted(random.sample(inner_nodes_idx, nFillers))
+    
+    # Start processs of creatting fillers
+    point_replacements = {} ## dict storing the positions of the new nodes, and their global numbering
+    point_offsets = {} ## dict associated with the offsets associates with new nodes
+    point_angles = {} ## dict storing associated with the angles that will be inserted
+    nNodes_added = 0 ## number of added in the final network
+    selected_nodes = [29, 34]
+    nNodes_new = nNodes_old
+    for node_idx in selected_nodes:
+        ## Call single filler creation function
+        filler_points, filler_angles, offset_points = create_filler_points(filler_radius, filler_epsilon,
+                                                                            node_idx, adjency, Nodes)
+        
+        ## Create numbering of the nodes to be added
+        filler_points_idx, offset_points_idx =  create_filler_numbering(len(filler_points), len(offset_points), 
+                                                                        nNodes_new)
+        nNodes_new += 2 * len(filler_points)
+        ## Store results and accumulate information 
+        point_replacements[node_idx] = filler_points, filler_points_idx
+        point_offsets[node_idx] = offset_points, offset_points_idx
+        point_angles[node_idx] = filler_angles
+        
+        ## Delete edges from the selected node
+        G.remove_node(node_idx)
+    
+    # Create add new Nodes to teh dict, and create new bonds
+    new_Nodes = {idx: coord for idx, coord in Nodes.items()} ## store initial nodes
+    new_Angles = {} ## list of angle triplets and the equilibrium angle
+    corresponding_bond_pair = {} ## pair of bonds that form the angle
+    nAngles = 0 ## number of angles
+    added_Bonds = defaultdict(list) ## list of added bonds
+    added_flags = defaultdict(list) ## flags associated with the added bonds
+    
+    for node_idx in selected_nodes:
+        ## Get list of neighbours from the adjcency
+        neighbours = tuple(adjency[node_idx].keys())
+        
+        ## Add new filler nodes and create bonds with the filler centre
+        filler_points = point_replacements[node_idx][0]
+        filler_points_idx = point_replacements[node_idx][1]
+        for local_idx, global_idx in enumerate(filler_points_idx):
+            ## Add filler node to the Nodes dict
+            new_Nodes[global_idx] = filler_points[local_idx]
+            
+            ## Form bond and store it in the new Bonds dict
+            bond = [global_idx, node_idx]
+            added_Bonds[node_idx].append(bond)
+            added_flags[node_idx].append((True, True)) ## second flag informs that bond does not contain offset
+        
+        ## Repeat process for the offset points
+        offset_points = point_offsets[node_idx][0]
+        offset_points_idx = point_offsets[node_idx][1]
+        for local_idx, global_idx in enumerate(offset_points_idx):
+            ## Add offset point to the 
+            new_Nodes[global_idx] = filler_points[local_idx]
+            
+            ## Add filler-to-offset connection
+            bond = [global_idx, filler_points_idx[local_idx]]
+            added_Bonds[node_idx].append(bond)
+            added_flags[node_idx].append((True, False))
+            if bond == [228, 225]:breakpoint()
+            
+            ## Add offset-to-node connection
+            bond =[global_idx, neighbours[local_idx]]
+            added_Bonds[node_idx].append(bond)
+            added_flags[node_idx].append((False, False))
+            if bond == [228, 225]:breakpoint()
+        
+        ## Form now the tripelts forming angles
+        filler_angles = point_angles[node_idx]
+        rows, cols = np.triu_indices(filler_angles.shape[0], k = 1) ## off-diagonal upper triangular indices
+        
+        for i, j in zip(rows, cols):
+            nAngles += 1 ## update number of angles
+            n1, n2 = filler_points_idx[i], filler_points_idx[j]
+            theta0 = filler_angles[i][j]
+            triplet = n1, node_idx, n2
+            new_Angles[nAngles] = [triplet, theta0]
+            corresponding_bond_pair[nAngles] = sorted([n1, node_idx]), sorted([n2, node_idx])
+        
+    # Create new Bonds dict
+    idx = 0 ## bond idx counter
+    new_Bonds = {} ## new dict of bonds
+    bond_flags = {} ## flags to separate bond types
+    angle_to_pair = defaultdict(list)
+    
+    for bond in G.edges(): ## preserved links in the network
+        idx += 1 ## uptade bond counter
+        new_Bonds[idx] = sorted(list(bond), reverse = False)
+        bond_flags[idx] = (False, False)
+    
+    for node_idx in added_Bonds.keys(): ## new links representing the fillers
+            bonds = added_Bonds[node_idx]
+            flags = added_flags[node_idx]
+            
+            for i, bond in enumerate(bonds):
+                idx += 1
+                new_Bonds[idx] = bond
+                bond_flags[idx] = flags[i]
+                matching_keys = [key for key, value in corresponding_bond_pair.items() if sorted(bond) in value]
+                for key in matching_keys:
+                    angle_to_pair[key].append(idx)
+                    
+        
+    return new_Nodes, new_Bonds, bond_flags, new_Angles, angle_to_pair, Boundary
+
+def create_filler_numbering(nFiller, nOffset, nNodes_old):
+    """
+    Create global node numbering of node added to form filler
+    
+    Inputs:
+        nFiller (int): number of filler points
+        nOffset (int): number of offset points
+        nNodes_old (int): old number of nodes in the network.
+    
+    Output:
+        filler_points_idx (tuple): node numbering of the filler points.
+        offset_points_idx (tuple): node numbering of the offset particles
+    """
+    # Loop over the filler points matrix
+    filler_points_idx = tuple(i + nNodes_old + 1 for i in range(nFiller))
+    
+    # Repeat now for the offsets, considering the filler points
+    offset_points_idx = tuple([i + nNodes_old + nFiller + 1 for i in range(nFiller)])
+    
+    return filler_points_idx, offset_points_idx
+
+
+def create_filler_points(filler_radius, filler_epsilon, idx_of_central_node, adjency, Nodes):
+    """
+    Create single filler particle
+    
+    Inputs:
+        filler_radius (float): Radius of the filler particle
+        filler_epsilon (float): pertubation of the offset points.
+        
+    Returns:
+        sphere_points (ndarray): points defining the sphere
+    """
+    # Get nodes connected to central node
+    neighbours = tuple(adjency[idx_of_central_node].keys())
+    
+    # Create filler as a sphere with given radius in the centre of the unit cell
+    filler_points, filler_angles = create_sphere_points(Nodes, neighbours, filler_radius, idx_of_central_node);
+    
+    # Creat offset of associated with the newly added bonds
+    offset_points = create_offset_points(filler_points, Nodes[idx_of_central_node], filler_epsilon)
+    
+    return filler_points, filler_angles, offset_points
+
+
+def create_sphere_points(Nodes, neighbours, filler_radius, idx_of_central_node):
+    """
+    Create points on a sphere for the 8chain geometry, and new connections to be placed
+    
+    Inputs:
+        Nodes (dict): Dict containing the coordinates of the nodes in the 8-chain cell
+        neighbours (tuple): idx of nodes originally connected to central node
+        filler_radius (float): sphere radius.
+        idx_of_central_node (int): index of node representing the sphere centre.
+        
+    Outputs:
+        sphere_points (ndarray): coordinates of the points on the sphere
+        sphere_angles (npdaary): symmetric and traceless matrix with angles between 
+                                 the sphere-to-point vectors.
+    """
+    
+    # Create Nx3 matrix with coordinates of neighbours to central node. (N = functionality)
+    neighbour_coords = np.array([Nodes[idx] for idx in neighbours]);
+    sphere_centre = Nodes[idx_of_central_node] ## cell centre
+    
+    # Create vectors
+    vectors_to_neighbours = neighbour_coords - sphere_centre ## from sphere centre to cube corners
+    unit_vectors_to_neighbours = vectors_to_neighbours / \
+                                np.linalg.norm(vectors_to_neighbours, axis = 1)[:, np.newaxis]
+    
+    # Scale unit vectors by the sphere radius
+    sphere_points = (unit_vectors_to_neighbours * filler_radius) + sphere_centre
+    
+    # Form now angles associated with the sphere
+    dot_products = np.dot(unit_vectors_to_neighbours, unit_vectors_to_neighbours.T)
+    sphere_angles = np.degrees(np.arccos(np.clip(dot_products, -1, 1)))
+    
+    return sphere_points, sphere_angles
+
+
+def create_offset_points(sphere_points, sphere_centre, epsilon):
+    """
+    Create points representing offsets assocauted with the new created 
+    points representing the sphere.
+    
+    Inputs:
+        offset_points (ndarray): Nx3 array with the coordinates of points on the sphere.
+        epsilon (float): Magnitude of the pertubation.
+        
+    Outputs:
+        offset_points (nparray): Nx3 array with coordinates of perturbed points.
+        
+    """
+    # Calculate unit vectors pointing in the radial direction
+    vector = sphere_points - sphere_centre
+    unit_vectors = vector / np.linalg.norm(vector, axis = 1)[:, np.newaxis]
+    
+    # Created perturbed points
+    offset_points = sphere_points + (epsilon * unit_vectors)
+    
+    return offset_points
+
+
 
 def write_data_file(filename, Nodes, Bonds, Angles, Boundary, BondTypes, model, 
                     params, rest_lengths, angle_model , angle_params):
@@ -174,7 +426,7 @@ def write_data_file(filename, Nodes, Bonds, Angles, Boundary, BondTypes, model,
     return
 
 
-def assign_bond_types(bond_flags, filler_radius, filler_epsilon, NKuhn, NKuhn_reduction = 1e6):
+def assign_bond_types(bond_flags, filler_radius, filler_epsilon, NKuhn, stiffness_ratio):
     """
     Assign spring properties to each bond in the network.
     
@@ -183,8 +435,8 @@ def assign_bond_types(bond_flags, filler_radius, filler_epsilon, NKuhn, NKuhn_re
         filler_radius (float): radius of the filler partilcles
         filler_epsilon (float): offset of the filler points
         NKuhn (float): original number of Kuhn segments.
-        NKuhn_reduction (float): reduction factor of the chain length for the filler 
-                                 bonds.
+        stiffness_ratio (float): ratio between filler bonds stiffness and that of
+                                 refular bonds.
         
     Outputs:
         BondTypes (dict): types of each bond and their chain lengths
@@ -193,7 +445,7 @@ def assign_bond_types(bond_flags, filler_radius, filler_epsilon, NKuhn, NKuhn_re
     
     # Create BondTypes containing chains lengths of each type
     BondTypes = {
-                idx: NKuhn / NKuhn_reduction if bond_flags[idx][0] else NKuhn
+                idx: NKuhn / stiffness_ratio if bond_flags[idx][0] else NKuhn
                 for idx in bond_flags.keys()
                 }
     

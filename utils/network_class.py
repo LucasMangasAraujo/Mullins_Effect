@@ -3,23 +3,105 @@ Script defining the NetworkClass.
 """
 
 import numpy as np
+import networkx as nx
 
 class NetworkClass:
     """
     A class to assist querying information from discrete networks.
     """
 
-    def __init__(self, data_file, dump_file):
+    def __init__(self, data_file, dump_file, input_file):
         """
         Class constructor
         
         Inputs:
             data_file (str): name of LAMMPS data file
             dump_file (str): name of LAMMPS dump file
+            input_file (str): name of LAMMPS inpute file
+            
         """
         self.data_file = data_file
         self.dump_file = dump_file
+        self.input_file = input_file
+    
+    
+    def get_computational_params(self, params):
+        """
+        Get computational params used in the simulation.
+        Inputs:
+            params (tuple): parameters in with physical units when relevant. 
+                            The order is the following:
+                                bKuhn: Kuhn length in nm
+                                NKuhn: Number of Kuhn segments in the chain.
+                                nub3: Normalised chain density in bKuhn3 units.
         
+        Outputs:
+            computational_params (tuple): parameters in computational units.
+        """
+        # Extract information DN structure
+        Nodes, Bonds = self.get_nodes_and_bonds()
+        Boundary = self.get_boundary()
+        
+        # Unpack input params 
+        bKuhn, NKuhn, nub3 = params
+        
+        # Normalise using the density of crosslinks (subtracting bounary nodes)
+        crosslinks = len(Nodes) - len(Boundary)
+        upsilonb3 = nub3 / 2
+        computational_bKuhn = np.power( upsilonb3 / crosslinks, 1/3)
+        
+        # Assemple computational_params tuple
+        computational_params = (computational_bKuhn, NKuhn)
+        
+        return computational_params
+    
+    
+    def create_DN_graph(self):
+        """
+        Turn DN into Graph.
+        
+        Inputs:
+            None
+            
+        Outputs:
+            G (networkx Graph): networkx graph object.
+        """
+        # Get Network structure
+        Nodes, Bonds = self.get_nodes_and_bonds()
+        
+        # Create Graph
+        G = nx.Graph();
+        G.add_nodes_from(Nodes);
+        for idx, (n1,n2) in Bonds.items():
+            G.add_edge(n1,n2);
+        
+        return G
+
+        
+        return G
+        
+    def get_boundary(self):
+        
+        # Read main file to find idx of the boundary nodes
+        with open(self.input_file, "r") as f:
+            ## Read file until group of boundary nodes is found
+            key = f.readline()
+            while 'group' not in key:
+                key = f.readline()
+            
+            ## Loop over split line and store ids of boundary nodes
+            data = key.strip('\n').split(" ")
+            Boundary = []
+            for idx in data:
+                try:
+                    Boundary.append(int(idx))
+                except ValueError:
+                    continue
+                
+            
+            
+        
+        return tuple(Boundary)
     
     def get_stretches(self, initial_distances):
         """

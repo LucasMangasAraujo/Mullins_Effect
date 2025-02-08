@@ -1,5 +1,109 @@
 import numpy as np
 import os
+import utils.pre_processing as pre
+from .network_class import NetworkClass
+from .loading import deformation_gradient
+
+def run_simulation(geometry_file, model, params, dim, nFillers, filler_radius,
+                    filler_epsilon, stiffness_ratio, angle_model, angle_params,
+                    loading, stretch_array, stretch_increment, data_file):
+    """
+    Run full simulation
+    """
+    
+    # Unpack parameters tuple
+    bKuhn, NKuhn, nub3 = params
+    
+    # Relax as generated network
+    relax_as_generated_DN(geometry_file, model, params, dim)
+    DN_gen = NetworkClass("temp.dat", "test.res", "main.in")
+    computational_params = DN_gen.get_computational_params(params) ## extract computational params
+    
+    # Place fillers in the networ and assign bond types
+    Nodes, Bonds, bond_flags, Angles, angle_to_pair, Boundary = pre.create_fillers(nFillers, filler_radius, filler_epsilon)
+    BondTypes, rest_lengths = pre.assign_bond_types(bond_flags, filler_radius, filler_epsilon, NKuhn, stiffness_ratio)
+    
+    # Write data file
+    pre.write_data_file(data_file, Nodes, Bonds, Angles, Boundary, BondTypes, model, 
+                            computational_params, rest_lengths ,angle_model, angle_params)
+    # Run relaxation step
+    print("Starting simulation...")
+    print(100 * "=")
+    bond_coeffs_lines = []
+    if model != '1':
+        breakpoint()
+    
+    run_relaxation_hybrid(dim, data_file, Boundary, model, angle_model, bond_coeffs_lines)
+    DN = NetworkClass(data_file, "test.res","main_hybrid.in") ## Netwotk object
+    cauchy_stress = DN.calculate_stress(dim);
+    initial_distances = DN.get_distances()
+    print("F_11 = 1, F_22 = 1, F_33 = 1")
+    print("S_11 = %g, S_22 = %g, S_33 = %g" %tuple(cauchy_stress))
+    print(100 * "=")
+    
+    # Apply deformation history
+    for i in range(1, len(stretch_array)):
+        print(100 * "=")
+        ## Run deformatio step
+        runinc(loading, i + 1, stretch_increment, dim, main_file = 'main_hybrid.in')
+        
+        ## Reconstruct data if needed
+        if model != '1':
+            breakpoint()
+        
+        ## Calculate DN information
+        DN = NetworkClass(data_file, "test.res","main_hybrid.in") ## Netwotk object
+        cauchy_stress = DN.calculate_stress(dim)
+        F = deformation_gradient(loading, stretch_array[i])
+        print("F_11 = %g, F_22 = %g, F_33 = %g" %tuple(F))
+        print("S_11 = %g, S_22 = %g, S_33 = %g" %tuple(cauchy_stress))
+        print(100 * "=")
+        breakpoint()
+    return
+
+
+
+
+
+def relax_as_generated_DN(geometry_file, model, params, dim):
+    """
+    Perform relaxation on as generated network
+    
+    Inputs: 
+        geometry_file (str): path to acces as-generated network
+        model (str): chain model to be used.
+                    '1': Gaussian chain.
+                    '2': FJC (Langevin) chain.
+        params (tuple): network parameters.
+        dim (int): dimention of the problem
+    
+    Outputs:
+        None
+    """
+    # Import relevant modules
+    #from .pre_processing import readGeometry, writePositions
+    
+    
+    # Extract Nodes, Bonds, Boudnary and BondTypes
+    Nodes, Bonds, Boundary, BondTypes = pre.readGeometry(geometry_file)
+    rest_lengths = {idx: 0. for idx in Bonds.keys()} ## list of rest lengths (needed to write the data file)
+    
+    # Calculate computational Kuhh length
+    bKuhn, NKuhn, nub3 = params
+    crosslinks = len(Nodes) - len(Boundary)
+    computational_bKuhn = np.power(nub3 /(2 * crosslinks), 1/3)
+    computational_params = (computational_bKuhn, NKuhn)
+    BondTypes = {idx: NKuhn for idx in BondTypes.keys()}
+    
+    # Write data file
+    temp_file = "temp.dat"
+    pre.writePositions(temp_file, Nodes, Bonds, Boundary, BondTypes, model, computational_params, rest_lengths)
+    
+    # Run relaxation
+    run_relaxation(dim, temp_file, Boundary, model)
+    
+    return
+
 
 def run_relaxation_hybrid(dim, temp_file, Boundary, model, angle_model, bond_coeff_lines):
     """
