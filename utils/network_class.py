@@ -4,10 +4,13 @@ Script defining the NetworkClass.
 
 import numpy as np
 import networkx as nx
+from collections import defaultdict
 
 class NetworkClass:
     """
-    A class to assist querying information from discrete networks.
+    A class to assist querying information from discrete networks. 
+    This is the parent class, defining methods that are general for
+    all types of networks
     """
 
     def __init__(self, data_file, dump_file, input_file):
@@ -188,63 +191,6 @@ class NetworkClass:
         
         return idx_of_regular_bonds
 
-    def get_angles_and_triplets(self):
-        """
-        Get initial angles and the triplets defining each one of them
-        Inputs:
-            None
-        
-        Outputs:
-            Angles (dict): triplet of nodes forming the angle and their 
-                           initial values. The function will return None
-                           if there are not angle restrictions.
-        """
-        # Check if method is aplicable 
-        with open(self.data_file, "r") as f:
-            lines = f.readlines()
-        NA_flags = ["Angles" in line or "Angle Coeffs" in line for line in lines]
-        if not any(NA_flags):
-            return None
-        
-        # Scan file
-        with open(self.data_file, "r") as f:
-            ## Go through file until angle coefficientes were found
-            key = f.readline()
-            while "Angle Coeffs" not in key:
-                key = f.readline()
-            
-            f.readline() ##read empty line
-            
-            ## Read the theta0 values of each angle
-            theta0 = {}
-            data = f.readline().strip("\n").split(" ")
-            while len(data) > 1:
-                theta0[int(data[0])] = float(data[2])
-                data = f.readline().strip("\n").split(" ")
-            
-            ## Now scan until the angles section is reached
-            key = f.readline()
-            while "Angle" not in key:
-                key = f.readline()
-            
-            f.readline() ## empty line 
-            
-            ## Read list of triplets and to which angle they are linked
-            data = f.readline().strip("\n").split(" ")
-            triplets = {}
-            while len(data) > 1:
-                idx = int(data[1])
-                triplet = int(data[2]), int(data[3]), int(data[4])
-                triplets[idx] = triplet
-                data = f.readline().strip("\n").split(" ")
-            
-        
-        # Assamble list of angles
-        Angles = {}
-        for idx in theta0.keys():
-            Angles[idx] = triplets[idx], theta0[idx]
-        
-        return Angles
 
     def get_nodes_and_bonds(self):
         """
@@ -343,3 +289,150 @@ class NetworkClass:
                 data = f.readline().split()
 
         return S
+
+
+
+class FillerNetworkClass(NetworkClass):
+    """
+    A class for filled networks inherented from the NetworkClass
+    """
+    
+    def get_filler_angles_deviations(self, angle_to_pair):
+        """
+        Get deviation of the filler angles after equilibrium for a 
+        given deformation.
+        
+        Inputs:
+            angle_to_pair(dict): angle-to-bond pair map.
+            
+        Outputs:
+            deviations (dict): average and std current-to-initial angle ratio
+        
+        """
+        # Query DN
+        Nodes, Bonds = self.get_nodes_and_bonds()
+        Angles = self.get_angles_and_triplets()
+        
+        # Loop over the angle-to-pair map
+        temp = defaultdict(list)
+        for angle_idx, bonds_idx in angle_to_pair.items():
+            ## Get the vectors
+            b1, b2 = Bonds[bonds_idx[0]], Bonds[bonds_idx[1]]
+            v1 = Nodes[b1[0]] - Nodes[b1[1]]
+            v2 = Nodes[b2[0]] - Nodes[b1[1]]
+            
+            ## Calculate current angle between pairs
+            dot_product = np.dot(v1 / np.linalg.norm(v1), v2 / np.linalg.norm(v2))
+            theta = np.degrees(np.arccos(np.clip(dot_product, -1, 1)))
+            
+            ## Store in appropriate position the information
+            b1, b2 = set(b1), set(b2)
+            node = next(iter((b1.intersection(b2))))
+            theta0 = Angles[angle_idx][1]
+            temp[node].append(np.abs(theta - theta0))
+            
+        
+        # Use the average the results in the dict
+        deviations = {key: (np.mean(data), np.std(data)) for key, data in temp.items()}
+        
+        # Return also maxmum and minimum deviation
+        max_key = max(deviations, key=lambda k: deviations[k][0])
+        min_key = min(deviations, key=lambda k: deviations[k][0])
+        max_avg_deviation = deviations[max_key][0]
+        min_avg_deviation = deviations[min_key][0]
+        
+        return deviations, max_avg_deviation, min_avg_deviation
+    
+    def get_filler_radii_deviations(self, bond_flags, selected_nodes, filler_radius):
+        """
+        Get the deviation in filler radii after equilibrium for a given
+        deformation.
+        
+        Inputs:
+            bond_flags (dict): flags that inform if bond forms a filler.
+            selected_nodes (list): indiced of the nodes acting as the filler centres.
+            filler_radius (flaot): expected radius of the filler.
+            
+        Outputs:
+            deviations (list): list of current-to-initial radii ratios.
+        """
+        # Query DN
+        Nodes, Bonds = self.get_nodes_and_bonds()
+        
+        # Map filler bonds to their centres
+        bond_to_centre_map = defaultdict(list)
+        for idx, bond in Bonds.items():
+            if all(bond_flags[idx]):
+                for node in bond:
+                    if node in selected_nodes:
+                        bond_to_centre_map[node].append(bond)
+            
+        
+        
+        # Calculate deviations
+        deviations = [
+            np.mean([np.linalg.norm(Nodes[n1] - Nodes[n2]) for (n1, n2) in bond_to_centre_map[node]]) / filler_radius
+            for node in selected_nodes
+        ]
+    
+        return deviations
+    
+    
+    
+    def get_angles_and_triplets(self):
+        """
+        Get initial angles and the triplets defining each one of them
+        Inputs:
+            None
+        
+        Outputs:
+            Angles (dict): triplet of nodes forming the angle and their 
+                           initial values. The function will return None
+                           if there are not angle restrictions.
+        """
+        # Check if method is aplicable 
+        with open(self.data_file, "r") as f:
+            lines = f.readlines()
+        NA_flags = ["Angles" in line or "Angle Coeffs" in line for line in lines]
+        if not any(NA_flags):
+            return None
+        
+        # Scan file
+        with open(self.data_file, "r") as f:
+            ## Go through file until angle coefficientes were found
+            key = f.readline()
+            while "Angle Coeffs" not in key:
+                key = f.readline()
+            
+            f.readline() ##read empty line
+            
+            ## Read the theta0 values of each angle
+            theta0 = {}
+            data = f.readline().strip("\n").split(" ")
+            while len(data) > 1:
+                theta0[int(data[0])] = float(data[2])
+                data = f.readline().strip("\n").split(" ")
+            
+            ## Now scan until the angles section is reached
+            key = f.readline()
+            while "Angle" not in key:
+                key = f.readline()
+            
+            f.readline() ## empty line 
+            
+            ## Read list of triplets and to which angle they are linked
+            data = f.readline().strip("\n").split(" ")
+            triplets = {}
+            while len(data) > 1:
+                idx = int(data[1])
+                triplet = int(data[2]), int(data[3]), int(data[4])
+                triplets[idx] = triplet
+                data = f.readline().strip("\n").split(" ")
+            
+        
+        # Assamble list of angles
+        Angles = {}
+        for idx in theta0.keys():
+            Angles[idx] = triplets[idx], theta0[idx]
+        
+        return Angles

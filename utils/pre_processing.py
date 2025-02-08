@@ -25,6 +25,7 @@ def create_fillers(nFillers, filler_radius, filler_epsilon):
         bond_flags (dict): flags indicating the nature of the bonds (regular, filler, offset)
         new_Angles (dict): angles between intra-filler bonds
         angle_to_pair(dict): map betwen pair of bonds idx and their associated angles
+        selected_nodes (list): node number of nodes selected to act as filler.
         
     """
     # Create Network object
@@ -151,7 +152,7 @@ def create_fillers(nFillers, filler_radius, filler_epsilon):
                     angle_to_pair[key].append(idx)
                     
         
-    return new_Nodes, new_Bonds, bond_flags, new_Angles, angle_to_pair, Boundary
+    return new_Nodes, new_Bonds, bond_flags, new_Angles, angle_to_pair, Boundary, selected_nodes
 
 def create_filler_numbering(nFiller, nOffset, nNodes_old):
     """

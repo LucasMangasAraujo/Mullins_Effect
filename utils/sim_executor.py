@@ -1,14 +1,34 @@
 import numpy as np
 import os
 import utils.pre_processing as pre
-from .network_class import NetworkClass
+import utils.post_processing as post
+from .network_class import NetworkClass, FillerNetworkClass
 from .loading import deformation_gradient
 
 def run_simulation(geometry_file, model, params, dim, nFillers, filler_radius,
                     filler_epsilon, stiffness_ratio, angle_model, angle_params,
                     loading, stretch_array, stretch_increment, data_file):
     """
-    Run full simulation
+    Run full simulation.
+    
+    Imputs:
+        geometry_file (str):
+        model (str):
+        params (tuple):
+        dim (int):
+        nFillers (int):
+        filler_radius(float):
+        filler_epsilon(float):
+        stiffness_ratio (float):
+        angle_model (str):
+        angle_params(tuple):
+        loading (int):
+        stretch_array (ndarray):
+        stretch_increment (float):
+        data_file (str):
+        
+    Outputs:
+        
     """
     
     # Unpack parameters tuple
@@ -20,13 +40,13 @@ def run_simulation(geometry_file, model, params, dim, nFillers, filler_radius,
     computational_params = DN_gen.get_computational_params(params) ## extract computational params
     
     # Place fillers in the networ and assign bond types
-    Nodes, Bonds, bond_flags, Angles, angle_to_pair, Boundary = pre.create_fillers(nFillers, filler_radius, filler_epsilon)
+    Nodes, Bonds, bond_flags, Angles, angle_to_pair, Boundary, selected_nodes = pre.create_fillers(nFillers, filler_radius, filler_epsilon)
     BondTypes, rest_lengths = pre.assign_bond_types(bond_flags, filler_radius, filler_epsilon, NKuhn, stiffness_ratio)
     
     # Write data file
     pre.write_data_file(data_file, Nodes, Bonds, Angles, Boundary, BondTypes, model, 
                             computational_params, rest_lengths ,angle_model, angle_params)
-    # Run relaxation step
+    # Run relaxation step ...
     print("Starting simulation...")
     print(100 * "=")
     bond_coeffs_lines = []
@@ -34,12 +54,19 @@ def run_simulation(geometry_file, model, params, dim, nFillers, filler_radius,
         breakpoint()
     
     run_relaxation_hybrid(dim, data_file, Boundary, model, angle_model, bond_coeffs_lines)
-    DN = NetworkClass(data_file, "test.res","main_hybrid.in") ## Netwotk object
+    
+    DN = FillerNetworkClass(data_file, "test.res","main_hybrid.in") ## Netwotk object
     cauchy_stress = DN.calculate_stress(dim);
-    initial_distances = DN.get_distances()
+    radii_deviations = DN.get_filler_radii_deviations(bond_flags, selected_nodes, filler_radius)
+    angles_deviations, max_dev, min_dev = DN.get_filler_angles_deviations(angle_to_pair)
+    
+    # ... and run initial information
     print("F_11 = 1, F_22 = 1, F_33 = 1")
     print("S_11 = %g, S_22 = %g, S_33 = %g" %tuple(cauchy_stress))
+    print("max radii deviation is %g, while the min is %g" %(max(radii_deviations), min(radii_deviations)))
+    print("max avg deviation (in degrees) is %g, while the min one is %g" %(max_dev, min_dev) )
     print(100 * "=")
+    
     
     # Apply deformation history
     for i in range(1, len(stretch_array)):
@@ -52,13 +79,22 @@ def run_simulation(geometry_file, model, params, dim, nFillers, filler_radius,
             breakpoint()
         
         ## Calculate DN information
-        DN = NetworkClass(data_file, "test.res","main_hybrid.in") ## Netwotk object
-        cauchy_stress = DN.calculate_stress(dim)
+        DN = FillerNetworkClass(data_file, "test.res","main_hybrid.in") ## Netwotk object
         F = deformation_gradient(loading, stretch_array[i])
+        cauchy_stress = DN.calculate_stress(dim)
+        radii_deviations = DN.get_filler_radii_deviations(bond_flags, selected_nodes, filler_radius)
+        angles_deviations, max_dev, min_dev = DN.get_filler_angles_deviations(angle_to_pair)
+        
+        ## Print currrent setp data
         print("F_11 = %g, F_22 = %g, F_33 = %g" %tuple(F))
         print("S_11 = %g, S_22 = %g, S_33 = %g" %tuple(cauchy_stress))
+        print("max radii deviation is %g, while the min is %g" %(max(radii_deviations), min(radii_deviations)))
+        print("max avg deviation (in degrees) is %g, while the min one is %g" %(max_dev, min_dev) )
+        
+        ## Get filler information
         print(100 * "=")
-        breakpoint()
+    
+    breakpoint()
     return
 
 
