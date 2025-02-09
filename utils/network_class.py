@@ -191,7 +191,6 @@ class NetworkClass:
         
         return idx_of_regular_bonds
 
-
     def get_nodes_and_bonds(self):
         """
         Get the bonds and node coordinates of the network.
@@ -289,13 +288,56 @@ class NetworkClass:
                 data = f.readline().split()
 
         return S
-
+    
+    @staticmethod
+    def render_stress_units(stress_array, bKuhn, T = 298):
+        """
+        Dimensionalise dimenionless stress in kPa
+        
+        Inputs:
+            stress_array (ndarray): rubbery components of stress in b^3/kT units
+            bKuhn (float): Kuhn length in nm.
+            T (float, default = 298 K): temperature in Kelvin.
+            
+        Ouputs:
+            stress_kPa (ndarray): stress array in kPa.
+            
+        """
+        # Declare Boltzmann constant
+        kB = 1.380649e-23
+        kT = kB * T ## temperatur in energy units
+        
+        # Render stress array with J/nm3 units
+        stress_J_over_nm3 = stress_array * kT / np.power(bKuhn, 3)
+        
+        # Convert to kPa
+        stress_kPa = stress_J_over_nm3 * 1e24
+        return stress_kPa
 
 
 class FillerNetworkClass(NetworkClass):
     """
     A class for filled networks inherented from the NetworkClass
     """
+    
+    
+    def get_volume_fraction(nFillers, filler_radius):
+        """
+        Calculate the volume fraction in the network for a given number of 
+        particles and dimensionless filler radius.
+        
+        Inputs:
+            nFillers(int): number of filler networks in the network
+            filler_radius (float):
+        Outputs:
+            
+        
+        """
+        # Calculate the volume fraction
+        vol_fraction = 4 * np.pi * np.power(filler_radius, 3) / 3.
+        return vol_fraction
+    
+    
     
     def get_filler_angles_deviations(self, angle_to_pair):
         """
@@ -436,3 +478,23 @@ class FillerNetworkClass(NetworkClass):
             Angles[idx] = triplets[idx], theta0[idx]
         
         return Angles
+        
+    
+    @staticmethod
+    def estimate_nFillers(vol_fraction, filler_radius):
+        """
+        Estimate the number of fillers particles needed in the network
+        for a given volume fraction of fillers and normalize filler 
+        radius.
+        """
+        nFillers = np.ceil(3 * vol_fraction / (4 * np.pi * np.power(filler_radius, 3)))
+        return int(nFillers)
+    
+    @staticmethod
+    def estimated_filler_radius(vol_fraction, nFillers):
+        """
+        Estimate normalised filler radius for a given filler volume
+        fraction and number of filler particles in the network
+        """
+        filler_radius = np.power(3 * vol_fraction / (4 * np.pi * nFillers), 1 / 3)
+        return filler_radius

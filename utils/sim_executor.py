@@ -11,7 +11,7 @@ def run_simulation(geometry_file, model, params, dim, nFillers, filler_radius,
     """
     Run full simulation.
     
-    Imputs:
+    Inputs:
         geometry_file (str):
         model (str):
         params (tuple):
@@ -28,7 +28,7 @@ def run_simulation(geometry_file, model, params, dim, nFillers, filler_radius,
         data_file (str):
         
     Outputs:
-        
+        stress_array (ndarray): Array with all the stress results
     """
     
     # Unpack parameters tuple
@@ -46,27 +46,30 @@ def run_simulation(geometry_file, model, params, dim, nFillers, filler_radius,
     # Write data file
     pre.write_data_file(data_file, Nodes, Bonds, Angles, Boundary, BondTypes, model, 
                             computational_params, rest_lengths ,angle_model, angle_params)
+    
+    # Initialise output array
+    stress_array = [] ## for now a list
+    
     # Run relaxation step ...
-    print("Starting simulation...")
+    print("Starting simulation for network in file %s..." %geometry_file)
     print(100 * "=")
     bond_coeffs_lines = []
     if model != '1':
         breakpoint()
     
     run_relaxation_hybrid(dim, data_file, Boundary, model, angle_model, bond_coeffs_lines)
-    
     DN = FillerNetworkClass(data_file, "test.res","main_hybrid.in") ## Netwotk object
-    cauchy_stress = DN.calculate_stress(dim);
+    cauchy_stress = DN.calculate_stress(dim) * np.power(computational_params[0], 3)
+    stress_array.append(cauchy_stress)
     radii_deviations = DN.get_filler_radii_deviations(bond_flags, selected_nodes, filler_radius)
     angles_deviations, max_dev, min_dev = DN.get_filler_angles_deviations(angle_to_pair)
     
-    # ... and run initial information
+    # ... and print initial information
     print("F_11 = 1, F_22 = 1, F_33 = 1")
     print("S_11 = %g, S_22 = %g, S_33 = %g" %tuple(cauchy_stress))
     print("max radii deviation is %g, while the min is %g" %(max(radii_deviations), min(radii_deviations)))
     print("max avg deviation (in degrees) is %g, while the min one is %g" %(max_dev, min_dev) )
     print(100 * "=")
-    
     
     # Apply deformation history
     for i in range(1, len(stretch_array)):
@@ -81,21 +84,97 @@ def run_simulation(geometry_file, model, params, dim, nFillers, filler_radius,
         ## Calculate DN information
         DN = FillerNetworkClass(data_file, "test.res","main_hybrid.in") ## Netwotk object
         F = deformation_gradient(loading, stretch_array[i])
-        cauchy_stress = DN.calculate_stress(dim)
+        cauchy_stress = DN.calculate_stress(dim) * np.power(computational_params[0], 3)
         radii_deviations = DN.get_filler_radii_deviations(bond_flags, selected_nodes, filler_radius)
         angles_deviations, max_dev, min_dev = DN.get_filler_angles_deviations(angle_to_pair)
         
-        ## Print currrent setp data
+        ## Print currrent step data
         print("F_11 = %g, F_22 = %g, F_33 = %g" %tuple(F))
         print("S_11 = %g, S_22 = %g, S_33 = %g" %tuple(cauchy_stress))
         print("max radii deviation is %g, while the min is %g" %(max(radii_deviations), min(radii_deviations)))
         print("max avg deviation (in degrees) is %g, while the min one is %g" %(max_dev, min_dev) )
         
-        ## Get filler information
+        ## Append current stress to the stress array
+        stress_array.append(cauchy_stress)
         print(100 * "=")
+        
+    print("Finished simulation for network in file %s!" %geometry_file)
+    print("\n\n")
     
-    breakpoint()
-    return
+    # Convert stress array to ndarray
+    stress_array = NetworkClass.render_stress_units(np.array(stress_array), bKuhn)
+    
+    return stress_array
+
+
+
+def runsim_natural(geometry_file, model, params, dim, loading, stretch_array, 
+                    stretch_increment):
+    """
+    Run full simulation for DN with no fillers.
+    
+    Inputs:
+        geometry_file (str):
+        model (str):
+        params (tuple):
+        dim (int):
+        loading (int):
+        stretch_array (ndarray):
+        stretch_increment (float):
+        
+    Outputs:
+        stress_array (ndarray): Array with all the stress results
+    """
+    
+    # Unpack parameters tuple
+    bKuhn, NKuhn, nub3 = params
+    
+    # Initialise output array
+    stress_array = [] ## for now a list
+    
+    # Relax as generated network
+    print("Starting simulation for network in file %s, with no fillers..." %geometry_file)
+    print(100 * "=")
+    relax_as_generated_DN(geometry_file, model, params, dim)
+    DN = NetworkClass("temp.dat", "test.res", "main.in")
+    computational_params = DN.get_computational_params(params) ## extract computational params
+    cauchy_stress = DN.calculate_stress(dim) * np.power(computational_params[0], 3)
+    stress_array.append(cauchy_stress)
+    
+    # ... and print initial information
+    print("F_11 = 1, F_22 = 1, F_33 = 1")
+    print("S_11 = %g, S_22 = %g, S_33 = %g" %tuple(cauchy_stress))
+    print(100 * "=")
+    
+    # Apply deformation history
+    for i in range(1, len(stretch_array)):
+        print(100 * "=")
+        ## Run deformatio step
+        runinc(loading, i + 1, stretch_increment, dim, main_file = 'main.in')
+        
+        ## Reconstruct data if needed
+        if model != '1':
+            breakpoint()
+        
+        ## Calculate DN information
+        DN = NetworkClass("temp.dat", "test.res","main_hybrid.in") ## Netwotk object
+        F = deformation_gradient(loading, stretch_array[i])
+        cauchy_stress = DN.calculate_stress(dim) * np.power(computational_params[0], 3)
+        
+        ## Print currrent step data
+        print("F_11 = %g, F_22 = %g, F_33 = %g" %tuple(F))
+        print("S_11 = %g, S_22 = %g, S_33 = %g" %tuple(cauchy_stress))
+        
+        ## Append current stress to the stress array
+        stress_array.append(cauchy_stress)
+        print(100 * "=")
+        
+    print("Finished simulation for network in file %s!" %geometry_file)
+    
+    # Convert stress array to ndarray
+    stress_array = NetworkClass.render_stress_units(np.array(stress_array), bKuhn)
+    
+    return stress_array
 
 
 
@@ -275,6 +354,7 @@ def runinc(loading,inc,dl,dim, main_file, periodic_flag = False):
     err = checkerror('log.lammps')
 
     return err
+
 
 
 def write_main_hybrid(simfile,posfile, Boundary,dim,model, angle_model, periodic_flag = False):
@@ -672,6 +752,9 @@ def checkerror(filename):
             print(line)
             return True
     return False
+
+
+
 
 if __name__ == "__main__":
     main()

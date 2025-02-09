@@ -54,7 +54,7 @@ def create_fillers(nFillers, filler_radius, filler_epsilon):
     point_offsets = {} ## dict associated with the offsets associates with new nodes
     point_angles = {} ## dict storing associated with the angles that will be inserted
     nNodes_added = 0 ## number of added in the final network
-    selected_nodes = [29, 34]
+    #selected_nodes = [29, 34]
     nNodes_new = nNodes_old
     for node_idx in selected_nodes:
         ## Call single filler creation function

@@ -3,6 +3,34 @@ Script containing functions responsible to generate loading informatio and varia
 """
 import numpy as np
 
+
+def get_loading_style(loading):
+    """
+    Get loading style based on the loading input.
+    
+    Inputs:
+        loading (int): integer identifying the loading type.
+                       1: uniaxial tension
+                       2: biaxial tension (equi-biaxial)
+                       3: pure shear
+                       
+    Outputs:
+        loading_style (str): name of the loading type.
+        
+    """
+    
+    if loading == 1:
+        loading_style = 'uniaxial tension'
+    elif loading == 2:
+        loading_style = 'bi(equi)-axial tension'
+    elif loading == 3:
+        loading_style = 'pure shear'
+    
+    return loading_style
+
+
+
+
 def create_monotonic_load(max_stretch, increments):
     """
     Create array with monotonic loading history and corresponding increment sizes.
