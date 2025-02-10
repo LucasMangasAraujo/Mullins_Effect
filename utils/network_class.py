@@ -134,62 +134,15 @@ class NetworkClass:
         # Get Node coordinates and their positions
         Nodes, Bonds = self.get_nodes_and_bonds()
         
-        # Get which bonds are regular
-        idx_of_regular_bonds = self.get_regular_bonds()
-        filtered_Bonds = {idx: bond for idx, bond in Bonds.items() if idx in idx_of_regular_bonds}
-        
         # Scan and store results
         distances = {}
-        for idx, bond in filtered_Bonds.items():
+        for idx, bond in Bonds.items():
             n1, n2 = bond
             vector = Nodes[n1] - Nodes[n2]
             distances[idx] = np.linalg.norm(vector)
         
         
         return distances
-    
-    def get_regular_bonds(self):
-        """
-        Get bonds number of regular chains. 
-        
-        Inputs:
-            None
-            
-        idx_of_regular_bonds (tuple): sequence of indices of regular chains.
-        """
-        
-        # Read file and find the regular bonds
-        idx_of_regular_bonds = []
-        with open(self.data_file, "r") as f:
-            ## Read until spring coefficients are found
-            key = f.readline()
-            while "Bond Coeffs" not in key:
-                key = f.readline()
-            
-            f.readline() ## empty line
-            
-            ## Check if hybrid bond style is being used
-            data = f.readline().strip("\n").split(" ")
-            try:
-                float(data[1])
-                hybrid_style_flag = False
-            except ValueError:
-                hybrid_style_flag = True
-            
-            ## Find the bonds defining the sphere
-            while len(data) > 1:
-                
-                if hybrid_style_flag:
-                    if not 'harmonic' in data:
-                        idx_of_regular_bonds.append(int(data[0]))
-                else:
-                    if np.isclose(float(data[-1]), 0):
-                        idx_of_regular_bonds.append(int(data[0]))
-                    
-                data = f.readline().strip("\n").split(" ")
-            
-        
-        return idx_of_regular_bonds
 
     def get_nodes_and_bonds(self):
         """
@@ -241,7 +194,7 @@ class NetworkClass:
                 Bonds[idx] = [n1, n2] 
 
                 data = f.readline().split()
-
+        
         return Nodes, Bonds
 
     def calculate_stress(self, dim):
@@ -319,6 +272,82 @@ class FillerNetworkClass(NetworkClass):
     """
     A class for filled networks inherented from the NetworkClass
     """
+    
+    def get_distances_filler(self):
+        """
+        Get distances in the network considering the presence 
+        of filler partiplces
+        
+        Inputs:
+            None
+        
+        Outputs:
+            distances (dict): distances of regular chains.
+        
+        """
+        
+        # Get Node coordinates and their positions
+        Nodes, Bonds = self.get_nodes_and_bonds()
+        
+        # Get which bonds are regular
+        idx_of_regular_bonds = self.get_regular_bonds()
+        filtered_Bonds = {idx: bond for idx, bond in Bonds.items() if idx in idx_of_regular_bonds}
+        
+        # Scan and store results
+        distances = {}
+        for idx, bond in filtered_Bonds.items():
+            n1, n2 = bond
+            vector = Nodes[n1] - Nodes[n2]
+            distances[idx] = np.linalg.norm(vector)
+        
+        return distances
+    
+    
+    def get_regular_bonds(self):
+        """
+        Get bonds number of regular chains, i.e, not forming filler particles.
+        
+        Inputs:
+            None
+            
+        Outputs:
+            idx_of_regular_bonds (tuple): sequence of indices of regular chains.
+        """
+        
+        # Read file and find the regular bonds
+        idx_of_regular_bonds = []
+        with open(self.data_file, "r") as f:
+            ## Read until spring coefficients are found
+            key = f.readline()
+            while "Bond Coeffs" not in key:
+                key = f.readline()
+            
+            f.readline() ## empty line
+            
+            ## Check if hybrid bond style is being used
+            data = f.readline().strip("\n").split(" ")
+            try:
+                float(data[1])
+                hybrid_style_flag = False
+            except ValueError:
+                hybrid_style_flag = True
+            
+            ## Find the bonds defining the sphere
+            while len(data) > 1:
+                
+                if hybrid_style_flag:
+                    if not 'harmonic' in data:
+                        idx_of_regular_bonds.append(int(data[0]))
+                else:
+                    if np.isclose(float(data[-1]), 0):
+                        idx_of_regular_bonds.append(int(data[0]))
+                    
+                data = f.readline().strip("\n").split(" ")
+            
+        
+        return idx_of_regular_bonds
+    
+    
     
     
     def get_volume_fraction(nFillers, filler_radius):
