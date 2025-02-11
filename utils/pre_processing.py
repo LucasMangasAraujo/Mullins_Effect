@@ -54,9 +54,18 @@ def create_fillers(nFillers, filler_radius, filler_epsilon):
     point_offsets = {} ## dict associated with the offsets associates with new nodes
     point_angles = {} ## dict storing associated with the angles that will be inserted
     nNodes_added = 0 ## number of added in the final network
-    #selected_nodes = [29, 34]
     nNodes_new = nNodes_old
-    for node_idx in selected_nodes:
+    placed_spheres = set() ## set containing the ids of added spheres
+    
+    
+    
+    for i in range(len(selected_nodes)):
+        
+        ## Check if sphere overlaps with the ones previously added
+        node_idx = check_sphere_overlap(Nodes, placed_spheres, selected_nodes[i], filler_radius, 
+                                        filler_epsilon, Boundary_set, selected_nodes)
+        placed_spheres.add(node_idx)
+        
         ## Call single filler creation function
         filler_points, filler_angles, offset_points = create_filler_points(filler_radius, filler_epsilon,
                                                                             node_idx, adjency, Nodes)
@@ -80,6 +89,7 @@ def create_fillers(nFillers, filler_radius, filler_epsilon):
     nAngles = 0 ## number of angles
     added_Bonds = defaultdict(list) ## list of added bonds
     added_flags = defaultdict(list) ## flags associated with the added bonds
+    
     
     for node_idx in selected_nodes:
         ## Get list of neighbours from the adjcency
@@ -108,13 +118,11 @@ def create_fillers(nFillers, filler_radius, filler_epsilon):
             bond = [global_idx, filler_points_idx[local_idx]]
             added_Bonds[node_idx].append(bond)
             added_flags[node_idx].append((True, False))
-            if bond == [228, 225]:breakpoint()
             
             ## Add offset-to-node connection
             bond =[global_idx, neighbours[local_idx]]
             added_Bonds[node_idx].append(bond)
             added_flags[node_idx].append((False, False))
-            if bond == [228, 225]:breakpoint()
         
         ## Form now the tripelts forming angles
         filler_angles = point_angles[node_idx]
@@ -153,6 +161,39 @@ def create_fillers(nFillers, filler_radius, filler_epsilon):
                     
         
     return new_Nodes, new_Bonds, bond_flags, new_Angles, angle_to_pair, Boundary, selected_nodes
+
+def check_sphere_overlap(Nodes, placed_spheres, idx_trial, radius, offset, Boundary, selected_nodes):
+    """
+    Check if current sphere overlaps with any of the previously placed.
+    
+    Output:
+        node_idx (int): idx of node where the non-overlaping sphere will be placed
+    """
+    
+    # First check if placed spheres set is possible
+    if len(placed_spheres) == 0:
+        return idx_trial
+    
+    # Calculate distance between the sphere centre and the othen ones 
+    sphere_centre = Nodes[idx_trial]
+    existing_centres = np.array([Nodes[idx] for idx in placed_spheres])
+    distances = np.sqrt(np.sum((existing_centres - sphere_centre) ** 2, axis=1))
+    
+    # Check if any distances lead to sphere colision. Replace node if needed
+    r_plus = radius + offset ## upper bound of the sphere
+    any_overlaped = distances < 2 * r_plus
+    
+    if np.any(any_overlaped):
+        breakpoint()
+    
+    else:
+        node_idx = idx_trial
+    
+    
+    return node_idx
+
+
+
 
 def create_filler_numbering(nFiller, nOffset, nNodes_old):
     """
