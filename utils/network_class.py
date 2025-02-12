@@ -273,6 +273,15 @@ class FillerNetworkClass(NetworkClass):
     A class for filled networks inherented from the NetworkClass
     """
     
+    
+    #def sphere_overlap(self, placed_spheres):
+        
+        
+        
+        
+    
+    
+    
     def get_distances_filler(self):
         """
         Get distances in the network considering the presence 

@@ -7,7 +7,7 @@ import random
 from pathlib import Path
 from .network_class import NetworkClass
 from collections import defaultdict
-
+from scipy.spatial import cKDTree
 
 
 def create_fillers(nFillers, filler_radius, filler_epsilon):
@@ -57,8 +57,6 @@ def create_fillers(nFillers, filler_radius, filler_epsilon):
     nNodes_new = nNodes_old
     placed_spheres = set() ## set containing the ids of added spheres
     
-    
-    
     for i in range(len(selected_nodes)):
         
         ## Check if sphere overlaps with the ones previously added
@@ -82,6 +80,12 @@ def create_fillers(nFillers, filler_radius, filler_epsilon):
         ## Delete edges from the selected node
         G.remove_node(node_idx)
     
+    # Print on the screen if overlaping spheres were detected
+    if not placed_spheres == set(selected_nodes):
+        print("Overlaping spheres were detected at the following nodes:")
+    else:
+        print("No overlapping was detected.")
+    
     # Create add new Nodes to teh dict, and create new bonds
     new_Nodes = {idx: coord for idx, coord in Nodes.items()} ## store initial nodes
     new_Angles = {} ## list of angle triplets and the equilibrium angle
@@ -91,7 +95,7 @@ def create_fillers(nFillers, filler_radius, filler_epsilon):
     added_flags = defaultdict(list) ## flags associated with the added bonds
     
     
-    for node_idx in selected_nodes:
+    for node_idx in placed_spheres:
         ## Get list of neighbours from the adjcency
         neighbours = tuple(adjency[node_idx].keys())
         
@@ -160,14 +164,27 @@ def create_fillers(nFillers, filler_radius, filler_epsilon):
                     angle_to_pair[key].append(idx)
                     
         
-    return new_Nodes, new_Bonds, bond_flags, new_Angles, angle_to_pair, Boundary, selected_nodes
+    return new_Nodes, new_Bonds, bond_flags, new_Angles, angle_to_pair, Boundary, placed_spheres
 
 def check_sphere_overlap(Nodes, placed_spheres, idx_trial, radius, offset, Boundary, selected_nodes):
     """
     Check if current sphere overlaps with any of the previously placed.
+    If that is the case, find replacement for that node.
     
+        Nodes (dict): nodes coordinates and their ids
+        placed_spheres (set): ids of nodes where spheres have been 
+                              succesfully placed
+        idx_trial (int): id of nodes where we attempt to place
+                         a sphere.
+        radius (float): sphere radius.
+        offset (float): offeset of sphere points.
+        Boundary (set): ids of nodes attached to the RVE boundary.
+        selected_nodes (set): ids of nodes initially drawn for sphere
+                              placement.
+        
     Output:
-        node_idx (int): idx of node where the non-overlaping sphere will be placed
+        node_idx (int): idx of node where the non-overlaping sphere will 
+                        be placed.
     """
     
     # First check if placed spheres set is possible
@@ -177,20 +194,59 @@ def check_sphere_overlap(Nodes, placed_spheres, idx_trial, radius, offset, Bound
     # Calculate distance between the sphere centre and the othen ones 
     sphere_centre = Nodes[idx_trial]
     existing_centres = np.array([Nodes[idx] for idx in placed_spheres])
-    distances = np.sqrt(np.sum((existing_centres - sphere_centre) ** 2, axis=1))
+    #distances = np.sqrt(np.sum((existing_centres - sphere_centre) ** 2, axis=1))
+    tree = cKDTree(existing_centres) ## distance tree for fast query
+    
     
     # Check if any distances lead to sphere colision. Replace node if needed
     r_plus = radius + offset ## upper bound of the sphere
-    any_overlaped = distances < 2 * r_plus
+    test = tree.query_ball_point(sphere_centre, 2 * r_plus)
+    any_overlaped = len(test) > 0
     
-    if np.any(any_overlaped):
+    if any_overlaped:
+        ## Add trial node idx in the list 
+        overlaped_idx = set()
+        overlaped_idx.add(idx_trial)
         breakpoint()
-    
+        ## Do drawing process first doing the difference between Nodes keys
+        nodes_idx_set = set([idx for idx in Nodes.keys()])
+        available_for_draw = nodes_idx_set.difference(Boundary)
+        
+        ## Now perform the difference between with respect to the idx of nodes we had
+        ## selected before. This ensures that we won't sample already picked nodes.
+        available_for_draw = available_for_draw.difference(selected_nodes)
+        
+        ## Finally sample one node from the available ones.
+        drawn_idx = random.sample(available_for_draw, 1)[0]
+        drawn_idx = 4
+        ## Check whether this node does not yield overlamping spheres.
+        repeat_flag = True
+        while repeat_flag:
+            sphere_centre = Nodes[drawn_idx]
+            distances = np.sqrt(np.sum((existing_centres - sphere_centre) ** 2, axis=1))
+            repeat_flag = np.any(distances < 2 * r_plus)
+            if repeat_flag:
+                breakpoint()
+                ## if drawn idx still leads to overlamping repeat sampling
+                overlaped_idx.add(drawn_idx)
+                available_for_draw = available_for_draw.difference(overlaped_idx)
+                drawn_idx = random.sample(available_for_draw, 1)[0]
+                
+                ## checked if newly drawn node makes sense
+                sphere_centre = Nodes[drawn_idx]
+                distances = np.sqrt(np.sum((existing_centres - sphere_centre) ** 2, axis=1))
+                repeat_flag = np.any(distances < 2 * r_plus)
+        
+        ## Assign that node to the placed_spheres set
+        node_idx = drawn_idx
+        
     else:
+        
         node_idx = idx_trial
     
     
     return node_idx
+
 
 
 
