@@ -76,7 +76,10 @@ def runsim(geometry_file, model, params, dim, nFillers, filler_radius,
     for i in range(1, len(stretch_array)):
         print(100 * "=")
         ## Run deformatio step
-        runinc(loading, i + 1, stretch_increment, dim, main_file = 'main_hybrid.in')
+        err = runinc(loading, i + 1, stretch_increment, dim, main_file = 'main_hybrid.in')
+        
+        if err:
+            breakpoint()
         
         ## Reconstruct data if needed
         if model != '1':
@@ -180,6 +183,22 @@ def runsim_rep(geometry_file, model, params, dim, nFillers, filler_radius,
     os.system("cp %s %s" %(data_file, current_data_file))
     os.system("mv %s %s" %(current_data_file, rep_path))
     
+    # Check for overlaps and spheres that might have left the domain
+    is_overlaped_array = DN.any_filler_overlap(selected_nodes, filler_radius, filler_epsilon)
+    if np.any(is_overlaped_array):
+        print("Filler overlap occured!!")
+        breakpoint()
+    else:
+        print("No filler overlapping detected in relaxation step.")
+    initial_box = DN.get_box_lengths()
+    is_missing_array = DN.any_filler_missing(selected_nodes, initial_box, filler_epsilon)
+    
+    if np.any(is_missing_array):
+        print("There are missing fillers !!!!")
+        breakpoint()
+    else:
+        print("Missing fillers were not detected")
+    
     
     # ... and print initial information
     print("F_11 = 1, F_22 = 1, F_33 = 1")
@@ -192,12 +211,16 @@ def runsim_rep(geometry_file, model, params, dim, nFillers, filler_radius,
     for i in range(1, len(stretch_array)):
         print(100 * "=")
         ## Run deformatio step
-        runinc(loading, i + 1, stretch_increment, dim, main_file = 'main_hybrid.in')
+        err = runinc(loading, i + 1, stretch_increment, dim, main_file = 'main_hybrid.in')
+        
+        if err:
+            breakpoint()
+        
         
         ## Reconstruct data if needed
         if model != '1':
             breakpoint()
-        
+            
         ## Calculate DN information
         DN = FillerNetworkClass(data_file, "test.res","main_hybrid.in") ## Netwotk object
         F = deformation_gradient(loading, stretch_array[i])
@@ -209,6 +232,14 @@ def runsim_rep(geometry_file, model, params, dim, nFillers, filler_radius,
         current_data_file = "Step_" + str(i) + ".dat"
         os.system("cp %s %s" %(data_file, current_data_file))
         os.system("mv %s %s" %(current_data_file, rep_path))
+        
+        ## Check for potential overlaps and missing fillers
+        is_overlaped_array = DN.any_filler_overlap(selected_nodes, filler_radius, filler_epsilon)
+        if np.any(is_overlaped_array):
+            print("Filler overlap occured!!")
+            breakpoint()
+        else:
+            print("No filler overlapping detected in current deformation step.")
         
         ## Print currrent step data
         print("F_11 = %g, F_22 = %g, F_33 = %g" %tuple(F))

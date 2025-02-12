@@ -5,6 +5,7 @@ Script defining the NetworkClass.
 import numpy as np
 import networkx as nx
 from collections import defaultdict
+from scipy.spatial import cKDTree
 
 class NetworkClass:
     """
@@ -196,7 +197,41 @@ class NetworkClass:
                 data = f.readline().split()
         
         return Nodes, Bonds
-
+    
+    
+    def get_box_lengths(self):
+        """
+        Get current box bounds.
+        
+        Inputs:
+            
+        Outputs:
+            box_lengths
+        """
+        box_lengths = {}
+        # Read file
+        with open(self.data_file, "r") as f:
+            key = f.readline()
+            ## kepp reading until relevant section is reached
+            while "xlo" not in key:
+                key = f.readline()
+            ## Read x length
+            data = key.strip("\n").split(" ")
+            box_lengths['x'] = float(data[1]) - float(data[0])
+            
+            ## Read y length
+            data = f.readline().strip("\n").split(" ")
+            box_lengths['y'] = float(data[1]) - float(data[0])
+            
+            ## Finally z length
+            data = f.readline().strip("\n").split(" ")
+            box_lengths['z'] = float(data[1]) - float(data[0])
+        
+        
+        return box_lengths
+    
+    
+    
     def calculate_stress(self, dim):
         """
         Calculate stress using virtual work.
@@ -273,13 +308,126 @@ class FillerNetworkClass(NetworkClass):
     A class for filled networks inherented from the NetworkClass
     """
     
+    def any_filler_missing(self, placed_fillers, initial_lengths, filler_offset):
+        """
+        Check if there are fillers outside the computational domain.
+        NOTE: THIS MIGHT NEED SOME ADAPTATIONS TO IDENTIFY POSSIBLE M
+        MISSING CANDIDATES.
+        
+        Inputs:
+            placed_fillers (set): ids of nodes where spheres were placed.
+            initial_lengths (dict): initial length of the simulation box.
+            
+        Outputs:
+            is_missing_array (ndarray): boolean array informing whether a 
+                                        filler is out of the domain.
+        """
+        # Query current box lengths
+        current_box = self.get_box_lengths()
+        stretches = [l / initial_lengths[key] for key, l in current_box.items()]
+        
+        # Caculate displacement deltas
+        delta_displacements = [(stretch - 1) for stretch in stretches]
+        box_bounds = [(0 - (du / 2), 1 + (du / 2)) for du in delta_displacements]
+        larger_box_bounds = [(-0.1 - (du / 2), 1.1 + (du / 2)) for du in delta_displacements]
+        
+        # Get DN graph and current position of the nodes
+        Nodes, _ = self.get_nodes_and_bonds()
+        G = self.create_DN_graph()
+        adjency = G.adj
+        
+        # Loop over the placed fillers set
+        is_missing_array = np.zeros(len(placed_fillers), dtype = bool)
+        for i, node_idx in enumerate(placed_fillers):
+            ## Initialize coordinates array
+            coordinates = []
+            coordinates.append(Nodes[node_idx])
+            
+            ## Get filler points and calculate distances
+            for n in adjency[node_idx].keys():
+                coordinates.append(Nodes[n])
+            
+            ## Check if any 
+            coordinates = np.array(coordinates) ## transform into matrix
+            x, y, z = coordinates[:,0], coordinates[:,1], coordinates[:,2]
+            mask_x = (x < box_bounds[0][0]) | (x > box_bounds[0][1])
+            mask_y = (y < box_bounds[1][0]) | (y > box_bounds[1][1])
+            mask_z = (z < box_bounds[2][0]) | (y > box_bounds[2][1])
+            flag = np.any(mask_x | mask_y | mask_z)
+            
+            ## Check if flag was triggered due to rounding errors
+            if flag:
+                    mask_x = (x < larger_box_bounds[0][0]) | (x > larger_box_bounds[0][1])
+                    mask_y = (y < larger_box_bounds[1][0]) | (y > larger_box_bounds[1][1])
+                    mask_z = (z < larger_box_bounds[2][0]) | (y > larger_box_bounds[2][1])
+                    larger_box_flag = np.any(mask_x | mask_y | mask_z)
+                    
+                    if larger_box_flag:
+                        is_missing_array[i] = flag
+                    else:
+                        is_missing_array[i] = larger_box_flag
+            else:
+                is_missing_array[i] = flag
+            
+        
+        
+        return is_missing_array
     
-    #def sphere_overlap(self, placed_spheres):
-        
-        
-        
-        
     
+    def any_filler_overlap(self, placed_fillers, filler_radius, filler_offset):
+        """
+        Check if there is sphere overlap in the simulation
+        
+        Inputs:
+            placed_fillers (set): ids of nodes where spheres were placed.
+            filler_radius (float): radius of the filler
+            filler_offset (float): offset of the filler points.
+        Outputs:
+            
+        """
+        # Get the filler particles
+        coords_of_fillers = self.get_filler_coordinates(placed_fillers)
+        
+        # Loop over the scan
+        is_overlaped_array = np.zeros(len(placed_fillers), dtype = bool)
+        overlap_distance = 2 * (filler_radius + filler_offset) ## filler diameter with offset
+        for i, node_idx in enumerate(placed_fillers):
+            ## Filter ids not being looked
+            other_fillers_idx = placed_fillers.difference([node_idx])
+            
+            ## Get filler centre and the other ones as well
+            filler_centre = coords_of_fillers[node_idx]
+            existing_centres = np.array(
+                                    [coords_of_fillers[idx] for idx in other_fillers_idx]
+                                       )
+            tree = cKDTree(existing_centres)
+            
+            ## Query and store results
+            distance_query = tree.query_ball_point(filler_centre, overlap_distance)
+            is_overlaped_array[i] = len(distance_query) > 0
+            
+        
+        
+        return is_overlaped_array
+    
+    def get_filler_coordinates(self, placed_fillers):
+        """
+        Get the coordinates of filler particles.
+        
+        Inputs:
+            placed_fillers (set): ids of nodes where spheres were placed.
+            
+        Outputs:
+            coords_of_fillers (dict): idx and coordinates of filler particles
+                                      centres.
+        """
+        # Get current nodes and 
+        Nodes, Bonds = self.get_nodes_and_bonds()
+        
+        # Only look at 
+        coords_of_fillers = {idx: Nodes[idx] for idx in placed_fillers}
+        
+        return coords_of_fillers
     
     
     def get_distances_filler(self):

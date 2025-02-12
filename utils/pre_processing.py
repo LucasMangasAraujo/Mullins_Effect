@@ -200,8 +200,8 @@ def check_sphere_overlap(Nodes, placed_spheres, idx_trial, radius, offset, Bound
     
     # Check if any distances lead to sphere colision. Replace node if needed
     r_plus = radius + offset ## upper bound of the sphere
-    test = tree.query_ball_point(sphere_centre, 2 * r_plus)
-    any_overlaped = len(test) > 0
+    distance_query = tree.query_ball_point(sphere_centre, 2 * r_plus)
+    any_overlaped = len(distance_query) > 0
     
     if any_overlaped:
         ## Add trial node idx in the list 
@@ -218,13 +218,14 @@ def check_sphere_overlap(Nodes, placed_spheres, idx_trial, radius, offset, Bound
         
         ## Finally sample one node from the available ones.
         drawn_idx = random.sample(available_for_draw, 1)[0]
-        drawn_idx = 4
+        
         ## Check whether this node does not yield overlamping spheres.
         repeat_flag = True
         while repeat_flag:
             sphere_centre = Nodes[drawn_idx]
-            distances = np.sqrt(np.sum((existing_centres - sphere_centre) ** 2, axis=1))
-            repeat_flag = np.any(distances < 2 * r_plus)
+            #distances = np.sqrt(np.sum((existing_centres - sphere_centre) ** 2, axis=1))
+            distance_query = tree.query_ball_point(sphere_centre, 2 * r_plus)
+            repeat_flag = len(distance_query) > 0
             if repeat_flag:
                 breakpoint()
                 ## if drawn idx still leads to overlamping repeat sampling
@@ -234,8 +235,9 @@ def check_sphere_overlap(Nodes, placed_spheres, idx_trial, radius, offset, Bound
                 
                 ## checked if newly drawn node makes sense
                 sphere_centre = Nodes[drawn_idx]
-                distances = np.sqrt(np.sum((existing_centres - sphere_centre) ** 2, axis=1))
-                repeat_flag = np.any(distances < 2 * r_plus)
+                #distances = np.sqrt(np.sum((existing_centres - sphere_centre) ** 2, axis=1))
+                distance_query = tree.query_ball_point(sphere_centre, 2 * r_plus)
+                repeat_flag = len(distance_query) > 0
         
         ## Assign that node to the placed_spheres set
         node_idx = drawn_idx
