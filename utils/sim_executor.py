@@ -171,12 +171,12 @@ def runsim_rep(geometry_file, model, params, dim, nFillers, filler_radius,
     if model != '1':
         ## When hybrid bond style is used, we need to store the bond coefficients
         ## lines.
-        bond_coeffs_lines = NetworkClass.get_bond_coeffs(data_file)
-        
+        bond_coeff_lines = NetworkClass.get_bond_coeffs(data_file)
     else:
-        bond_coeffs_lines = []
+        ## Otherwise proceed stating an empty list
+        bond_coeff_lines = []
     
-    run_relaxation_hybrid(dim, data_file, Boundary, model, angle_model, bond_coeffs_lines)
+    run_relaxation_hybrid(dim, data_file, Boundary, model, angle_model, bond_coeff_lines)
     DN = FillerNetworkClass(data_file, "test.res","main_hybrid.in") ## Netwotk object
     cauchy_stress = DN.calculate_stress(dim) * np.power(computational_params[0], 3)
     stress_array.append(cauchy_stress)
@@ -215,16 +215,17 @@ def runsim_rep(geometry_file, model, params, dim, nFillers, filler_radius,
     # Apply deformation history
     for i in range(1, len(stretch_array)):
         print(100 * "=")
+        
         ## Run deformatio step
         err = runinc(loading, i + 1, stretch_increment, dim, main_file = 'main_hybrid.in')
         
+        ## Check for simulation errors.
         if err:
             breakpoint()
         
-        
         ## Reconstruct data if needed
         if model != '1':
-            breakpoint()
+            post.rewrite_data_file(bond_coeff_lines, data_file)
             
         ## Calculate DN information
         DN = FillerNetworkClass(data_file, "test.res","main_hybrid.in") ## Netwotk object
@@ -392,9 +393,6 @@ def runsim_rep_natural(geometry_file, model, params, dim, loading, stretch_array
         ## Run deformatio step
         runinc(loading, i + 1, stretch_increment, dim, main_file = 'main.in')
         
-        ## Reconstruct data if needed
-        if model != '1':
-            breakpoint()
         
         ## Calculate DN information
         DN = NetworkClass("temp.dat", "test.res","main_hybrid.in") ## Netwotk object
@@ -421,9 +419,6 @@ def runsim_rep_natural(geometry_file, model, params, dim, loading, stretch_array
     stress_array = NetworkClass.render_stress_units(np.array(stress_array), bKuhn)
     
     return stress_array
-
-
-
 
 
 
@@ -488,7 +483,6 @@ def run_relaxation_hybrid(dim, temp_file, Boundary, model, angle_model, bond_coe
     
     # If hybrid bond style was used, rewrite the bond coefficients section
     if model != '1':
-        breakpoint()
         from .post_processing import rewrite_data_file
         rewrite_data_file(bond_coeff_lines, temp_file)
     
