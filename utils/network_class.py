@@ -28,6 +28,33 @@ class NetworkClass:
         self.dump_file = dump_file
         self.input_file = input_file
     
+    @staticmethod
+    def get_bond_coeffs(data_file):
+        """
+        Get lines of the data file containing the bond coefficients
+        
+        Inputs:
+            data_file (str): file name containing the lammps data file.
+            
+        Outputs:
+            bond_coeffs_lines (list): lines of the containing the bond
+                                      coefficients.
+        """
+        bond_coeffs_lines = []
+        with open(data_file, "r") as f:
+            key = f.readline()
+            while "Bond Coeffs" not in key:
+                key = f.readline()
+            
+            bond_coeffs_lines.append(key)
+            key = f.readline()
+            while "Angle Coeffs" not in key:
+                bond_coeffs_lines.append(key)
+                key = f.readline()
+        
+        
+        return bond_coeffs_lines
+    
     
     def get_computational_params(self, params):
         """

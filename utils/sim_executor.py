@@ -167,9 +167,14 @@ def runsim_rep(geometry_file, model, params, dim, nFillers, filler_radius,
     # Run relaxation step ...
     print("Starting simulation for network in file %s..." %geometry_file)
     print(100 * "=")
-    bond_coeffs_lines = []
+    
     if model != '1':
-        breakpoint()
+        ## When hybrid bond style is used, we need to store the bond coefficients
+        ## lines.
+        bond_coeffs_lines = NetworkClass.get_bond_coeffs(data_file)
+        
+    else:
+        bond_coeffs_lines = []
     
     run_relaxation_hybrid(dim, data_file, Boundary, model, angle_model, bond_coeffs_lines)
     DN = FillerNetworkClass(data_file, "test.res","main_hybrid.in") ## Netwotk object
@@ -483,6 +488,7 @@ def run_relaxation_hybrid(dim, temp_file, Boundary, model, angle_model, bond_coe
     
     # If hybrid bond style was used, rewrite the bond coefficients section
     if model != '1':
+        breakpoint()
         from .post_processing import rewrite_data_file
         rewrite_data_file(bond_coeff_lines, temp_file)
     
