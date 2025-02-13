@@ -55,15 +55,38 @@ def runsim(geometry_file, model, params, dim, nFillers, filler_radius,
     print("Starting simulation for network in file %s..." %geometry_file)
     print(100 * "=")
     bond_coeffs_lines = []
-    if model != '1':
-        breakpoint()
     
-    run_relaxation_hybrid(dim, data_file, Boundary, model, angle_model, bond_coeffs_lines)
+    if model != '1':
+        ## When hybrid bond style is used, we need to store the bond coefficients
+        ## lines.
+        bond_coeff_lines = NetworkClass.get_bond_coeffs(data_file)
+    else:
+        ## Otherwise proceed stating an empty list
+        bond_coeff_lines = []
+    
+    run_relaxation_hybrid(dim, data_file, Boundary, model, angle_model, bond_coeff_lines)
     DN = FillerNetworkClass(data_file, "test.res","main_hybrid.in") ## Netwotk object
     cauchy_stress = DN.calculate_stress(dim) * np.power(computational_params[0], 3)
     stress_array.append(cauchy_stress)
     radii_deviations = DN.get_filler_radii_deviations(bond_flags, selected_nodes, filler_radius)
     angles_deviations, max_dev, min_dev = DN.get_filler_angles_deviations(angle_to_pair)
+    
+    # Check for overlaps and spheres that might have left the domain
+    is_overlaped_array = DN.any_filler_overlap(selected_nodes, filler_radius, filler_epsilon)
+    if np.any(is_overlaped_array):
+        print("Filler overlap occured!!")
+        breakpoint()
+    else:
+        print("No filler overlapping detected in relaxation step.")
+    initial_box = DN.get_box_lengths()
+    is_missing_array = DN.any_filler_missing(selected_nodes, initial_box, filler_epsilon)
+    
+    if np.any(is_missing_array):
+        print("There are missing fillers !!!!")
+        breakpoint()
+    else:
+        print("Missing fillers were not detected")
+    
     
     # ... and print initial information
     print("F_11 = 1, F_22 = 1, F_33 = 1")
@@ -75,15 +98,17 @@ def runsim(geometry_file, model, params, dim, nFillers, filler_radius,
     # Apply deformation history
     for i in range(1, len(stretch_array)):
         print(100 * "=")
+        
         ## Run deformatio step
         err = runinc(loading, i + 1, stretch_increment, dim, main_file = 'main_hybrid.in')
         
+        ## Check for simulation errors.
         if err:
             breakpoint()
         
         ## Reconstruct data if needed
         if model != '1':
-            breakpoint()
+            post.rewrite_data_file(bond_coeff_lines, data_file)
         
         ## Calculate DN information
         DN = FillerNetworkClass(data_file, "test.res","main_hybrid.in") ## Netwotk object
@@ -91,6 +116,16 @@ def runsim(geometry_file, model, params, dim, nFillers, filler_radius,
         cauchy_stress = DN.calculate_stress(dim) * np.power(computational_params[0], 3)
         radii_deviations = DN.get_filler_radii_deviations(bond_flags, selected_nodes, filler_radius)
         angles_deviations, max_dev, min_dev = DN.get_filler_angles_deviations(angle_to_pair)
+        
+        
+        ## Check for potential overlaps and missing fillers
+        is_overlaped_array = DN.any_filler_overlap(selected_nodes, filler_radius, filler_epsilon)
+        if np.any(is_overlaped_array):
+            print("Filler overlap occured!!")
+            breakpoint()
+        else:
+            print("No filler overlapping detected in current deformation step.")
+        
         
         ## Print currrent step data
         print("F_11 = %g, F_22 = %g, F_33 = %g" %tuple(F))
